@@ -13,6 +13,7 @@ assertCatalog();
 const uiRoot = path.resolve(__dirname, "ui");
 const sessionPath = path.resolve(__dirname, "data", "session.json");
 const scansDir = path.resolve(__dirname, "data", "scans");
+const appPage = "/GottSecurity/HotspotAnalysis/Index.html";
 const catalog = toClientCatalog();
 const options = parseArgs(process.argv);
 const CHOICES = {
@@ -536,6 +537,16 @@ const server = http.createServer(async (req, res) => {
       res.end();
       return;
     }
+    if (req.method === "GET" && (url.pathname === "/" || url.pathname === "/index.html" || url.pathname === "/GottSecurity/HotspotAnalysis" || url.pathname === "/GottSecurity/HotspotAnalysis/")) {
+      res.writeHead(302, { Location: appPage, "Cache-Control": "no-store" });
+      res.end();
+      return;
+    }
+    if (req.method === "GET" && url.pathname === appPage) {
+      const page = await fs.promises.readFile(path.join(uiRoot, "index.html"));
+      send(res, 200, page, "text/html; charset=utf-8");
+      return;
+    }
     if (req.method !== "GET") {
       sendJson(res, 405, { error: "Method not allowed." });
       return;
@@ -562,7 +573,7 @@ server.on("error", (err) => {
 });
 
 server.listen(options.port, "127.0.0.1", () => {
-  console.log(`Security Hotspot Navigator at http://127.0.0.1:${options.port}`);
+  console.log(`Security Hotspot Analysis at http://127.0.0.1:${options.port}${appPage}`);
   console.log("Passive mode does not read a repository. Active scan runs only when you ask.");
   if (options.repo) console.log(`Default repo path: ${options.repo}`);
 });

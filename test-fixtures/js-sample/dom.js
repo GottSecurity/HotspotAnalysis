@@ -12,3 +12,4 @@ localStorage.setItem("token", next);
 user.__proto__ = JSON.parse(next);
 new WebSocket(next);
 eval(next);
+const token = Math.random().toString();

@@ -1539,7 +1539,7 @@ const STEPS = [
     searches: [
       search({
         id: "weak-crypto",
-        languages: ["node", "java", "spring", "python", "javascript"],
+        languages: ["node", "java", "spring", "python"],
         category: "Cryptography",
         title: "Weak hash, cipher, or random API",
         role: "review",
@@ -1558,6 +1558,26 @@ const STEPS = [
         verify: "A cache key is a different decision from a session token or a password hash.",
         secureAlternative:
           "Use SHA-256 or stronger for integrity, AES-GCM for encryption, a password hash for passwords, and SecureRandom or crypto.randomBytes for tokens.",
+      }),
+      search({
+        id: "js-random",
+        languages: ["javascript"],
+        category: "Cryptography",
+        title: "Browser Math.random",
+        role: "review",
+        priority: "Medium",
+        rank: 13,
+        top: true,
+        keywords: ["Math.random"],
+        regex: "\\bMath\\.random\\s*\\(",
+        why: "Math.random is not a cryptographic generator. Tokens, identifiers, and secrets built from it can be guessed.",
+        whatToCheck:
+          "See whether the number becomes a token, a password reset value, or only a visual effect.",
+        falsePositives:
+          "A random animation delay or a shuffle of non-sensitive UI items.",
+        verify: "Anything that grants access or hides data should not use Math.random.",
+        secureAlternative:
+          "Use crypto.getRandomValues or crypto.randomUUID for tokens and identifiers.",
       }),
     ],
   },

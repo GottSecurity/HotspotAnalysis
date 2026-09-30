@@ -95,6 +95,9 @@ async function main() {
   if (!has((item) => item.file.includes("js-sample") && item.title === "Prototype pollution")) {
     fail("Expected a prototype pollution match");
   }
+  if (!has((item) => item.file.includes("js-sample") && item.title === "Browser Math.random")) {
+    fail("Expected a browser Math.random match");
+  }
   if (!has((item) => item.file.includes("js-sample") && item.title === "eval and Function")) {
     fail("Expected a JavaScript eval match");
   }

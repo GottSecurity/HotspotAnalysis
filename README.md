@@ -22,7 +22,7 @@ Or pass a repository path to prefill Active mode. Nothing is scanned until you c
 node server.js --repo "C:\code\interview-repo"
 ```
 
-Open [http://127.0.0.1:3000](http://127.0.0.1:3000).
+Open [http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Index.html](http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Index.html). The server root redirects there.
 
 Use `--port` to change the port. The server listens on `127.0.0.1` only.
 

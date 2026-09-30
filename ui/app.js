@@ -46,6 +46,7 @@ const state = {
   scanError: "",
   history: [],
   open: {},
+  strategyOpen: {},
   marks: loadMarks(),
   leftOpen: true,
   rightOpen: true,
@@ -202,7 +203,9 @@ function renderMain() {
   const note = state.mode === "passive"
     ? "Passive mode does not read your repository. Copy a regex, then use Find in Files. The editor shows the line number and can jump to it."
     : "";
+  document.title = "Security Hotspot Analysis";
   document.getElementById("main").innerHTML = `
+    ${brandHtml()}
     ${note ? `<p class="note">${esc(note)}</p>` : ""}
     <div class="center-tools">
       <button type="button" class="ghost" data-action="collapse-all">Collapse all</button>
@@ -256,7 +259,8 @@ function paintMode() {
 function brandHtml() {
   return `
     <header class="brand">
-      <h1>Security Hotspot Navigator</h1>
+      <p class="byline">Gott Security</p>
+      <h1>Security Hotspot Analysis</h1>
       <p class="lede">A local review guide for Node.js, JavaScript, Java, Spring, and Python. Work the checklist in order, and paste each regex into your editor.</p>
       <p class="disclaimer">${esc(state.catalog.disclaimer)}</p>
     </header>
@@ -265,7 +269,6 @@ function brandHtml() {
 
 function passiveControls() {
   return `
-    ${brandHtml()}
     <div class="mode" role="group" aria-label="Operating mode">
       <button type="button" data-action="mode" data-mode="passive" aria-pressed="${state.mode === "passive" ? "true" : "false"}">Passive</button>
       <button type="button" data-action="mode" data-mode="active" aria-pressed="${state.mode === "active" ? "true" : "false"}">Active</button>
@@ -313,7 +316,6 @@ function passiveControls() {
 
 function activeControls() {
   return `
-    ${brandHtml()}
     <div class="mode" role="group" aria-label="Operating mode">
       <button type="button" data-action="mode" data-mode="passive" aria-pressed="${state.mode === "passive" ? "true" : "false"}">Passive</button>
       <button type="button" data-action="mode" data-mode="active" aria-pressed="${state.mode === "active" ? "true" : "false"}">Active</button>
@@ -608,7 +610,7 @@ function renderActiveList() {
 
 function activeStepHtml(step, matches, note) {
   const shown = step.id === state.currentStep;
-  const open = Boolean(state.open[step.id]);
+  const strategyOpen = Boolean(state.strategyOpen[step.id]);
   const guide = guideStep(step);
   const group = state.view === "top" && shown
     ? selectTop(matches)
@@ -640,10 +642,10 @@ function activeStepHtml(step, matches, note) {
         ${marksHtml(step.id)}
       </div>
       <section class="strategy">
-        <button type="button" class="step-toggle" data-action="toggle-step" data-step="${esc(step.id)}" aria-expanded="${open ? "true" : "false"}">
-          <span><strong>Regex and strategy</strong> <span class="summary">${guide.searchCount === 1 ? "1 search" : `${guide.searchCount} searches`}</span></span>
+        <button type="button" class="step-toggle" data-action="toggle-strategy" data-step="${esc(step.id)}" aria-expanded="${strategyOpen ? "true" : "false"}">
+          <span><strong class="strategy-label">Regex and strategy</strong> <span class="summary">${guide.searchCount === 1 ? "1 search" : `${guide.searchCount} searches`}</span></span>
         </button>
-        <div class="step-body" ${open ? "" : "hidden"}>
+        <div class="step-body" ${strategyOpen ? "" : "hidden"}>
           <ol>${step.guidance.map((line) => `<li>${esc(line)}</li>`).join("")}</ol>
           ${cards}
         </div>
@@ -928,6 +930,14 @@ async function onClick(event) {
     scheduleSave();
     return;
   }
+  if (action === "toggle-strategy") {
+    const body = button.closest(".strategy").querySelector(".step-body");
+    const willOpen = body.hidden;
+    body.hidden = !willOpen;
+    button.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    state.strategyOpen[button.dataset.step] = willOpen;
+    return;
+  }
   if (action === "toggle-step") {
     const body = button.closest(".step").querySelector(".step-body");
     const willOpen = body.hidden;
@@ -971,7 +981,10 @@ async function onClick(event) {
   }
   if (action === "collapse-all") {
     state.holdClosed = true;
-    for (const step of state.catalog.steps) state.open[step.id] = false;
+    for (const step of state.catalog.steps) {
+      state.open[step.id] = false;
+      state.strategyOpen[step.id] = false;
+    }
     if (state.mode === "passive") renderGuide();
     else renderActiveList();
     return;

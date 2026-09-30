@@ -194,12 +194,23 @@ h1 {
   color: var(--gold);
 }
 
+.byline {
+  margin: 0 0 4px;
+  color: var(--teal);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .lede, .disclaimer {
   margin: 0;
   color: #e7dcc8;
   max-width: 36ch;
   font-size: 14px;
 }
+
+.center .brand .lede,
+.center .brand .disclaimer { max-width: 68ch; }
 
 .disclaimer { margin-top: 8px; color: #fff4d8; }
 
@@ -463,6 +474,8 @@ input[type="search"], input[type="text"] { text-transform: none; letter-spacing:
   flex: 1;
   min-width: 0;
 }
+
+.strategy-label { text-transform: uppercase; letter-spacing: 0.04em; }
 
 .strategy {
   margin: 8px 10px 0;
