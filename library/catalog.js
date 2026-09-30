@@ -489,6 +489,33 @@ const STEPS = [
         secureAlternative:
           "Use bcrypt, scrypt, argon2, or PBKDF2 with a unique salt. Do not use a bare message digest for passwords.",
       }),
+      search({
+        id: "noop-password",
+        languages: ["java", "spring"],
+        category: "Password Handling",
+        title: "No-op password encoder",
+        role: "review",
+        priority: "High",
+        rank: 4,
+        top: true,
+        keywords: [
+          "NoOpPasswordEncoder",
+          "MessageDigestPasswordEncoder",
+          "StandardPasswordEncoder",
+          "LdapShaPasswordEncoder",
+          "Md4PasswordEncoder",
+        ],
+        regex:
+          "\\b(NoOpPasswordEncoder|MessageDigestPasswordEncoder|StandardPasswordEncoder|LdapShaPasswordEncoder|Md4PasswordEncoder)\\b",
+        why: "NoOpPasswordEncoder compares the password as stored. It does not hash. The other names are fast or deprecated encoders. Do not use them for passwords.",
+        whatToCheck:
+          "Find the PasswordEncoder bean and the registration path. NoOpPasswordEncoder.getInstance() means the stored value is the password itself.",
+        falsePositives:
+          "A comment or a test that names the class in order to forbid it. A production @Bean that returns it is the finding.",
+        verify: "Read the bean method. A cast to NoOpPasswordEncoder is still a no-op encoder.",
+        secureAlternative:
+          "Return a BCryptPasswordEncoder, Argon2PasswordEncoder, or SCryptPasswordEncoder. Do not use NoOpPasswordEncoder.",
+      }),
     ],
   },
   {
@@ -1447,7 +1474,7 @@ const STEPS = [
       }),
       search({
         id: "spring-mass",
-        languages: ["spring"],
+        languages: ["java", "spring"],
         category: "Mass Assignment",
         title: "Request body binding",
         role: "source",
@@ -1467,7 +1494,7 @@ const STEPS = [
       }),
       search({
         id: "spring-form-binding",
-        languages: ["spring"],
+        languages: ["java", "spring"],
         category: "Mass Assignment",
         title: "Classic form binding",
         role: "source",
