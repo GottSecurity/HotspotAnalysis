@@ -15,6 +15,7 @@ const LANGUAGES = [
   { id: "node", label: "Node.js" },
   { id: "java", label: "Java" },
   { id: "spring", label: "Spring / Spring Boot" },
+  { id: "python", label: "Python" },
 ];
 
 const CATEGORIES = [
@@ -188,6 +189,33 @@ const STEPS = [
           "Prefer explicit request mappings and bind only the fields the handler needs.",
       }),
       search({
+        id: "spring-api",
+        languages: ["spring"],
+        category: "External entry points",
+        title: "Spring HTTP APIs",
+        role: "source",
+        priority: "High",
+        rank: 20,
+        keywords: [
+          "@HttpExchange",
+          "@GetExchange",
+          "@PostExchange",
+          "RestClient",
+          "RepositoryRestResource",
+          "FeignClient",
+        ],
+        regex:
+          "@(HttpExchange|GetExchange|PostExchange|PutExchange|DeleteExchange)\\b|\\b(RestClient|RepositoryRestResource|FeignClient)\\b",
+        why: "These types publish or call an HTTP API. Interface clients and Spring Data REST repositories are entry points even when the class has no @RestController.",
+        whatToCheck:
+          "List the path, the method, and every value the caller can send. For a client, see whether the URL or path comes from a request.",
+        falsePositives:
+          "A RestClient bean whose base URL is fixed configuration and whose methods only accept an id.",
+        verify: "Open the interface or the repository and follow each argument into a query, a file path, or another outbound call.",
+        secureAlternative:
+          "Keep API contracts narrow. Do not pass a caller-supplied host into RestClient or a Feign URL.",
+      }),
+      search({
         id: "java-input",
         languages: ["java"],
         category: "External entry points",
@@ -214,6 +242,34 @@ const STEPS = [
         verify: "Confirm the receiver is the HTTP request, not a local file or test fixture.",
         secureAlternative:
           "Parse request values into a validated type before they reach a sink.",
+      }),
+      search({
+        id: "python-entry",
+        languages: ["python"],
+        category: "External entry points",
+        title: "Python request input",
+        role: "source",
+        priority: "High",
+        rank: 20,
+        keywords: [
+          "request.args",
+          "request.form",
+          "request.json",
+          "request.GET",
+          "request.POST",
+          "APIRouter",
+          "@app.route",
+        ],
+        regex:
+          "@(app|router)\\.(route|get|post|put|patch|delete)\\b|\\b(APIRouter|urlpatterns)\\b|\\brequest\\.(args|form|json|values|data|files|GET|POST|headers|cookies)\\b",
+        why: "Flask, Django, and FastAPI read caller data from the request object and from route decorators.",
+        whatToCheck:
+          "Record the parameter name and the view that receives it. Follow that value into queries, paths, commands, and templates.",
+        falsePositives:
+          "A health route that never reads the request, or a request object used only to read a fixed setting.",
+        verify: "Open the view and follow each request value to the next call.",
+        secureAlternative:
+          "Validate input at the view and pass only the fields the operation needs.",
       }),
     ],
   },
@@ -331,6 +387,47 @@ const STEPS = [
           "Replace a broad permitAll with a narrow public matcher and authenticated() for everything else.",
       }),
       search({
+        id: "spring-security-bypass",
+        languages: ["spring"],
+        category: "Authentication",
+        title: "Spring Security bypasses",
+        role: "review",
+        priority: "Critical",
+        rank: 1,
+        top: true,
+        keywords: ["csrf.disable", "headers().disable", "web.ignoring", "WebSecurityCustomizer", "anonymous()"],
+        regex:
+          "csrf\\(\\)\\.disable|csrf\\.disable\\s*\\(|web\\.ignoring\\s*\\(|\\bWebSecurityCustomizer\\b|\\.anonymous\\s*\\(",
+        why: "These calls turn off CSRF, skip the security filter chain, or treat the caller as anonymous. Each one needs a reason.",
+        whatToCheck:
+          "Read the matcher on the same chain. A disable or ignoring rule with no path applies more broadly than a single public route.",
+        falsePositives:
+          "CSRF disabled only for a stateless bearer-token API, or ignoring() limited to static assets.",
+        verify: "Pair csrf.disable and web.ignoring with the request matchers above them.",
+        secureAlternative:
+          "Leave CSRF on for cookie-authenticated apps. Ignore only the specific static paths you intend.",
+      }),
+      search({
+        id: "python-auth",
+        languages: ["python"],
+        category: "Authentication",
+        title: "Python authentication checks",
+        role: "review",
+        priority: "Medium",
+        rank: 20,
+        keywords: ["login_required", "login_user", "HTTPBearer", "OAuth2PasswordBearer", "jwt.decode"],
+        regex:
+          "\\b(login_required|login_user|HTTPBearer|OAuth2PasswordBearer)\\b|jwt\\.decode\\s*\\(",
+        why: "These calls show where a Python view checks identity or decodes a token.",
+        whatToCheck:
+          "See whether the decorator or dependency is on the views that change data. A helper that exists but is not applied leaves the view open.",
+        falsePositives:
+          "login_required on the login view only, or a dependency that is defined and never used.",
+        verify: "Confirm the check is attached to the route you care about.",
+        secureAlternative:
+          "Require authentication by default and opt out only the public routes.",
+      }),
+      search({
         id: "password-storage",
         languages: ["node", "java", "spring"],
         category: "Password Handling",
@@ -419,6 +516,25 @@ const STEPS = [
         verify: "Do not file a missing-annotation bug from the regex alone.",
         secureAlternative:
           "Authorize the operation and the specific object. Role checks do not replace object checks.",
+      }),
+      search({
+        id: "python-authz",
+        languages: ["python"],
+        category: "Authorization / IDOR / BOLA",
+        title: "Python permission checks",
+        role: "review",
+        priority: "Medium",
+        rank: 2,
+        keywords: ["permission_required", "user_passes_test", "has_perm", "IsAdminUser", "IsAuthenticated"],
+        regex: "\\b(permission_required|user_passes_test|has_perm|IsAdminUser|IsAuthenticated)\\b",
+        why: "These are common Django and REST framework permission checks. A missing decorator does not by itself mean the view is open.",
+        whatToCheck:
+          "If you see the check, read which permission it requires. If you do not, look for an owner comparison before the object is returned or changed.",
+        falsePositives:
+          "IsAuthenticated on a view whose object check lives in the queryset.",
+        verify: "Stay on the view and look for an owner comparison or a permission check before the object is used.",
+        secureAlternative:
+          "Load the object in a query that includes the caller, or check a permission against that object before use.",
       }),
       search({
         id: "node-authz",
@@ -618,6 +734,26 @@ const STEPS = [
         secureAlternative:
           "Keep the SQL text constant and bind values. Do not append request strings.",
       }),
+      search({
+        id: "python-sql",
+        languages: ["python"],
+        category: "SQL Injection",
+        title: "Python SQL execution",
+        role: "sink",
+        priority: "Critical",
+        rank: 4,
+        top: true,
+        keywords: ["cursor.execute", "executemany", ".raw(", "text(f"],
+        regex: "\\bcursor\\.execute\\s*\\(|\\bexecutemany\\s*\\(|\\.raw\\s*\\(|\\btext\\s*\\(\\s*f[\"']",
+        why: "execute and raw SQL are sinks when the string includes request data.",
+        whatToCheck:
+          "See whether the SQL string is a constant with placeholders or is built with an f-string, %, or concatenation.",
+        falsePositives:
+          "cursor.execute(sql, params) where sql is a constant and the values are bound parameters.",
+        verify: "An f-string or percent format inside execute is the case to stay on.",
+        secureAlternative:
+          "Keep the SQL text constant and pass values as bound parameters.",
+      }),
     ],
   },
   {
@@ -671,6 +807,27 @@ const STEPS = [
         verify: "A single string passed to exec is parsed by the runtime and is riskier than a fixed argument list.",
         secureAlternative:
           "Use ProcessBuilder with a fixed executable and separate arguments. Do not build one command string from request data.",
+      }),
+      search({
+        id: "python-command",
+        languages: ["python"],
+        category: "Command Injection",
+        title: "Python process execution",
+        role: "sink",
+        priority: "Critical",
+        rank: 3,
+        top: true,
+        keywords: ["os.system", "os.popen", "subprocess.run", "subprocess.Popen", "shell=True"],
+        regex:
+          "\\b(os\\.system|os\\.popen|subprocess\\.(run|Popen|call|check_output))\\s*\\(|\\bshell\\s*=\\s*True\\b",
+        why: "Potential command injection sink. shell=True and os.system parse a command string.",
+        whatToCheck:
+          "See whether any argument comes from the request. A shell string is riskier than a fixed argument list.",
+        falsePositives:
+          "subprocess.run with a fixed argument list and shell left at its default of False.",
+        verify: "Stay on the call if the command text or shell=True is influenced by request data.",
+        secureAlternative:
+          "Call a fixed executable with a list of arguments and leave shell=False.",
       }),
     ],
   },
@@ -762,6 +919,26 @@ const STEPS = [
         verify: "getOriginalFilename is attacker-controlled, including path separators.",
         secureAlternative:
           "Ignore the client path. Generate a server filename, store it outside the web root, and validate content before use.",
+      }),
+      search({
+        id: "python-file",
+        languages: ["python"],
+        category: "Path Traversal",
+        title: "Python file and upload APIs",
+        role: "sink",
+        priority: "High",
+        rank: 5,
+        top: true,
+        keywords: ["send_file", "send_from_directory", "FileSystemStorage", "request.files"],
+        regex: "\\b(send_file|send_from_directory|FileSystemStorage|request\\.files)\\b",
+        why: "These calls read or store a file whose name may come from the request.",
+        whatToCheck:
+          "See whether the path includes a request value or the original upload filename, and whether the result is served from a web root.",
+        falsePositives:
+          "send_file of a server-generated name under a directory the caller cannot choose.",
+        verify: "request.files filenames are attacker-controlled, including path separators.",
+        secureAlternative:
+          "Ignore the client path. Generate a server filename and store it outside the web root.",
       }),
     ],
   },
@@ -864,6 +1041,27 @@ const STEPS = [
         secureAlternative:
           "Accept only relative paths on an allow-list, or map a short code to a server-side destination.",
       }),
+      search({
+        id: "python-ssrf",
+        languages: ["python"],
+        category: "SSRF",
+        title: "Python outbound HTTP",
+        role: "sink",
+        priority: "High",
+        rank: 7,
+        top: true,
+        keywords: ["requests.get", "requests.post", "httpx", "urllib.request.urlopen"],
+        regex:
+          "\\b(requests|httpx)\\.(get|post|put|request)\\s*\\(|urllib\\.request\\.urlopen\\s*\\(",
+        why: "Potential SSRF sink if the URL or hostname comes from the request.",
+        whatToCheck:
+          "See whether request.args, request.form, or a JSON field supplies the URL.",
+        falsePositives:
+          "A client aimed at a constant URL or a configured internal service.",
+        verify: "If the caller picks the host, check for an allow-list and a block on link-local and metadata addresses.",
+        secureAlternative:
+          "Allow-list destinations. Do not pass a request URL straight to requests, httpx, or urlopen.",
+      }),
     ],
   },
   {
@@ -964,6 +1162,26 @@ const STEPS = [
         secureAlternative:
           "Do not parse caller-supplied expressions. If a template is required, use SimpleEvaluationContext and a fixed expression.",
       }),
+      search({
+        id: "python-deser",
+        languages: ["python"],
+        category: "Deserialization",
+        title: "Python deserialization",
+        role: "sink",
+        priority: "Critical",
+        rank: 8,
+        top: true,
+        keywords: ["pickle.loads", "yaml.load", "marshal.loads", "eval", "exec"],
+        regex: "\\b(pickle\\.loads|yaml\\.load|marshal\\.loads|eval|exec)\\s*\\(",
+        why: "pickle, unsafe YAML, marshal, eval, and exec can run caller-controlled data.",
+        whatToCheck:
+          "See whether the bytes or the string come from a request, a queue, or a file a caller can write.",
+        falsePositives:
+          "yaml.safe_load does not match this pattern. eval of a constant in a test is still worth a glance, then move on.",
+        verify: "pickle.loads of a request body is the case to stay on.",
+        secureAlternative:
+          "Use a data format such as JSON. Do not unpickle or eval request data.",
+      }),
     ],
   },
   {
@@ -979,7 +1197,7 @@ const STEPS = [
     searches: [
       search({
         id: "secret-assign",
-        languages: ["node", "java", "spring"],
+        languages: ["node", "java", "spring", "python"],
         category: "Secrets",
         title: "Literal secret assignment",
         role: "review",
@@ -1070,6 +1288,26 @@ const STEPS = [
         secureAlternative:
           "Keep template escaping on. Do not mark request data as safe HTML.",
       }),
+      search({
+        id: "python-xss",
+        languages: ["python"],
+        category: "XSS",
+        title: "Python HTML sinks",
+        role: "sink",
+        priority: "High",
+        rank: 9,
+        top: true,
+        keywords: ["render_template_string", "Markup", "mark_safe", "|safe"],
+        regex: "\\b(render_template_string|Markup|mark_safe)\\b|\\|\\s*safe\\b",
+        why: "These calls mark text as HTML or render a template from a string. Request data in that string is an XSS review.",
+        whatToCheck:
+          "See whether the template string or the marked value comes from the request.",
+        falsePositives:
+          "mark_safe of a constant fragment, or a template file rendered with autoescape on.",
+        verify: "render_template_string of request data is the case to stay on.",
+        secureAlternative:
+          "Render a file template and leave autoescape on. Do not mark request data as safe HTML.",
+      }),
     ],
   },
   {
@@ -1144,6 +1382,27 @@ const STEPS = [
         secureAlternative:
           "Bind a small form object and copy the allowed fields in code, or call setAllowedFields with an explicit list.",
       }),
+      search({
+        id: "python-mass",
+        languages: ["python"],
+        category: "Mass Assignment",
+        title: "Request fields copied into a model",
+        role: "sink",
+        priority: "High",
+        rank: 12,
+        top: true,
+        keywords: ["**request.form", "**request.data", "validated_data", "objects.create"],
+        regex:
+          "\\*\\*\\s*request\\.(form|json|data|POST)|\\*\\*\\s*serializer\\.validated_data|\\.objects\\.create\\s*\\(",
+        why: "Spreading the request into a model or serializer can set role, owner, or status fields the form never showed.",
+        whatToCheck:
+          "List the fields on the model. See whether the caller can send is_staff, role, owner, or account status.",
+        falsePositives:
+          "objects.create with an explicit field list, or a serializer that names the allowed fields.",
+        verify: "A serializer with fields = '__all__' is the stronger match.",
+        secureAlternative:
+          "Copy an allow-list of fields. Do not spread the request into a model create or update.",
+      }),
     ],
   },
   {
@@ -1159,7 +1418,7 @@ const STEPS = [
     searches: [
       search({
         id: "weak-crypto",
-        languages: ["node", "java", "spring"],
+        languages: ["node", "java", "spring", "python"],
         category: "Cryptography",
         title: "Weak hash, cipher, or random API",
         role: "review",
@@ -1233,6 +1492,46 @@ const STEPS = [
         secureAlternative:
           "Set Secure, HttpOnly, and SameSite on session cookies. Give JWTs an expiration and verify the signature.",
       }),
+      search({
+        id: "spring-security-oauth",
+        languages: ["spring"],
+        category: "Session / Cookies",
+        title: "Spring Security OAuth and JWT",
+        role: "review",
+        priority: "High",
+        rank: 14,
+        top: true,
+        keywords: ["oauth2ResourceServer", "oauth2Login", "JwtDecoder", "NimbusJwtDecoder"],
+        regex: "\\b(oauth2ResourceServer|oauth2Login|JwtDecoder|NimbusJwtDecoder)\\b",
+        why: "These calls decide how a Spring API accepts a bearer token or an OAuth login.",
+        whatToCheck:
+          "See which issuer and audience are accepted, and whether the decoder restricts the algorithm. Then see which routes require the token.",
+        falsePositives:
+          "A resource server whose issuer and audience are pinned and whose routes sit behind authenticated().",
+        verify: "Read the JwtDecoder bean and the request matchers on the same security chain.",
+        secureAlternative:
+          "Validate issuer, audience, and algorithm. Require authentication on the API routes.",
+      }),
+      search({
+        id: "python-session",
+        languages: ["python"],
+        category: "Session / Cookies",
+        title: "Python session and cookie flags",
+        role: "review",
+        priority: "Medium",
+        rank: 14,
+        top: true,
+        keywords: ["set_cookie", "SESSION_COOKIE_HTTPONLY", "SESSION_COOKIE_SECURE", "SECRET_KEY"],
+        regex: "\\b(set_cookie|SESSION_COOKIE_HTTPONLY|SESSION_COOKIE_SECURE|SECRET_KEY)\\b",
+        why: "Session cookies and the signing key decide whether a Python session can be read or forged.",
+        whatToCheck:
+          "Look for HttpOnly, Secure, and SameSite on set_cookie. Confirm SECRET_KEY is not a literal in source.",
+        falsePositives:
+          "A cookie that holds a non-sensitive preference and is intentionally readable by script.",
+        verify: "Session identifiers should not be readable by script and should not be sent on plain HTTP.",
+        secureAlternative:
+          "Set httponly, secure, and samesite on session cookies. Load the signing key from the environment.",
+      }),
     ],
   },
   {
@@ -1287,6 +1586,26 @@ const STEPS = [
         secureAlternative:
           "Keep CSRF protection for cookie-authenticated state changes. Restrict CORS to known origins.",
       }),
+      search({
+        id: "python-csrf",
+        languages: ["python"],
+        category: "CSRF",
+        title: "Python CSRF exemptions",
+        role: "review",
+        priority: "High",
+        rank: 15,
+        top: true,
+        keywords: ["csrf_exempt", "CSRF_COOKIE_SECURE"],
+        regex: "\\b(csrf_exempt|CSRF_COOKIE_SECURE)\\b",
+        why: "csrf_exempt turns CSRF checks off for that view. CSRF_COOKIE_SECURE shows how the token cookie is sent.",
+        whatToCheck:
+          "See whether the exempt view changes state and uses a cookie session. A bearer-token API is a different case.",
+        falsePositives:
+          "An exemption on a webhook that authenticates with a signature instead of a session cookie.",
+        verify: "Read the view under the decorator before treating the exemption as a defect.",
+        secureAlternative:
+          "Keep CSRF protection on cookie-authenticated state changes. Exempt only signature-checked callbacks.",
+      }),
     ],
   },
   {
@@ -1302,7 +1621,7 @@ const STEPS = [
     searches: [
       search({
         id: "sensitive-log",
-        languages: ["node", "java", "spring"],
+        languages: ["node", "java", "spring", "python"],
         category: "Logging / Sensitive Data",
         title: "Possible sensitive log argument",
         role: "review",
@@ -1365,6 +1684,25 @@ const STEPS = [
         verify: "Dependency review is manual. The regex does not know which version is vulnerable.",
         secureAlternative:
           "Keep debug SQL and wide-open actuators out of production configuration. Pin and review dependencies.",
+      }),
+      search({
+        id: "python-debug",
+        languages: ["python"],
+        category: "Dependency / Configuration",
+        title: "Python debug mode",
+        role: "review",
+        priority: "Medium",
+        rank: 20,
+        keywords: ["DEBUG = True", "debug=True", "app.run"],
+        regex: "\\bDEBUG\\s*=\\s*True\\b|\\bapp\\.run\\s*\\([^\\n]*debug\\s*=\\s*True",
+        why: "Debug mode can expose tracebacks and an interactive console. Confirm this is not the production setting.",
+        whatToCheck:
+          "See whether the flag is hardcoded or comes from an environment check that production will set to false.",
+        falsePositives:
+          "A local settings module that is not the module production imports.",
+        verify: "Dependency review is still manual. This pattern only highlights debug switches.",
+        secureAlternative:
+          "Read DEBUG from the environment and keep it off in production.",
       }),
     ],
   },

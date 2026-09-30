@@ -15,7 +15,7 @@ const catalog = toClientCatalog();
 const options = parseArgs(process.argv);
 const CHOICES = {
   mode: ["passive", "active"],
-  language: ["all", "node", "java", "spring"],
+  language: ["all", "node", "java", "spring", "python"],
   searchType: ["all", "keywords", "regex", "checklist"],
   tool: ["vscode", "notepad", "ripgrep"],
   sort: ["priority", "confidence", "category", "file", "step", "line"],

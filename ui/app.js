@@ -254,7 +254,7 @@ function brandHtml() {
   return `
     <header class="brand">
       <h1>Security Hotspot Navigator</h1>
-      <p class="lede">A local review guide for Node.js, Java, and Spring. Work the checklist in order, and paste each regex into your editor.</p>
+      <p class="lede">A local review guide for Node.js, Java, Spring, and Python. Work the checklist in order, and paste each regex into your editor.</p>
       <p class="disclaimer">${esc(state.catalog.disclaimer)}</p>
     </header>
   `;
@@ -423,7 +423,10 @@ function renderGuide() {
     const caseNote = " When a pattern says case insensitive, turn off Match case in the editor.";
     hint.textContent = TOOLS[state.tool] + caseNote;
     if (state.language === "spring") {
-      hint.textContent += " Spring review includes the Java searches plus Spring Framework and Spring Boot patterns.";
+      hint.textContent += " Spring review includes the Java searches plus Spring Framework, Spring Boot, Spring Security, and Spring HTTP API patterns.";
+    }
+    if (state.language === "python") {
+      hint.textContent += " Python review covers Flask, Django, and FastAPI request entry, queries, commands, and template output.";
     }
   }
   ensureCurrentStep();
@@ -745,6 +748,7 @@ function activeLanguage(item) {
     return item.language === "java" || (item.language === "spring" && item.tags.includes("java"));
   }
   if (state.language === "spring") return item.language === "spring";
+  if (state.language === "python") return item.language === "python";
   return false;
 }
 
@@ -827,6 +831,7 @@ function languageName(id) {
   if (id === "node") return "Node.js";
   if (id === "java") return "Java";
   if (id === "spring") return "Spring / Spring Boot";
+  if (id === "python") return "Python";
   if (id === "config") return "Configuration";
   return id;
 }

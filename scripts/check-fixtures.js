@@ -65,6 +65,21 @@ async function main() {
   if (!has((item) => item.title === "Spring expression evaluation" && item.match.includes("parseExpression"))) {
     fail("Expected a Spring expression match");
   }
+  if (!has((item) => item.title === "Spring Security bypasses" && item.match.includes("csrf.disable"))) {
+    fail("Expected a Spring Security bypass");
+  }
+  if (!has((item) => item.title === "Spring Security OAuth and JWT" && item.match.includes("oauth2ResourceServer"))) {
+    fail("Expected a Spring Security OAuth match");
+  }
+  if (!has((item) => item.title === "Spring HTTP APIs" && item.match.includes("GetExchange"))) {
+    fail("Expected a Spring HTTP API match");
+  }
+  if (!has((item) => item.file.includes("python-sample") && item.title === "Python SQL execution")) {
+    fail("Expected a Python SQL match");
+  }
+  if (!has((item) => item.file.includes("python-sample") && item.category === "Command Injection")) {
+    fail("Expected a Python command execution match");
+  }
   if (!has((item) => item.category === "Command Injection" && item.file.includes("java-sample"))) {
     fail("Expected a Java command execution match");
   }

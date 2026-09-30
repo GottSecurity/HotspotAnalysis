@@ -18,6 +18,9 @@ const SKIP_DIRS = new Set([
   "vendor",
   "generated",
   "generated-sources",
+  "__pycache__",
+  "venv",
+  ".venv",
 ]);
 
 const SOURCE_EXT = new Set([
@@ -31,6 +34,7 @@ const SOURCE_EXT = new Set([
   ".properties",
   ".yml",
   ".yaml",
+  ".py",
 ]);
 
 const MAX_FILE_BYTES = 1_000_000;
@@ -64,6 +68,7 @@ function classify(rel, text) {
     return "config";
   }
   if ([".js", ".mjs", ".cjs", ".ts", ".tsx", ".jsx"].includes(ext)) return "node";
+  if (ext === ".py") return "python";
   if (ext === ".java") {
     if (
       /@(RestController|Controller|SpringBootApplication|RequestMapping|GetMapping|PostMapping|PutMapping|PatchMapping|DeleteMapping|Service|Repository|Configuration|EnableWebSecurity)\b/.test(
@@ -86,6 +91,7 @@ function applies(family, search) {
   if (family === "spring") {
     return search.languages.includes("spring") || search.languages.includes("java");
   }
+  if (family === "python") return search.languages.includes("python");
   return false;
 }
 
@@ -246,6 +252,7 @@ function languageMatch(hotspot, selected) {
     return hotspot.language === "java" || (hotspot.language === "spring" && hotspot.tags.includes("java"));
   }
   if (selected === "spring") return hotspot.language === "spring";
+  if (selected === "python") return hotspot.language === "python";
   return false;
 }
 

@@ -13,6 +13,7 @@ public class SecurityConfig {
     SecurityFilterChain filter(HttpSecurity http) throws Exception {
         return http
             .csrf(csrf -> csrf.disable())
+            .oauth2ResourceServer(oauth -> oauth.jwt(jwt -> {}))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/public/**").permitAll()
                 .anyRequest().authenticated())
