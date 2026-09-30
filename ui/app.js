@@ -208,6 +208,7 @@ function renderMain() {
     ${brandHtml()}
     ${note ? `<p class="note">${esc(note)}</p>` : ""}
     <div class="center-tools">
+      <a class="ghost" href="/GottSecurity/HotspotAnalysis/Status.html">Status</a>
       <button type="button" class="ghost" data-action="collapse-all">Collapse all</button>
     </div>
     <div id="list"></div>
@@ -682,15 +683,17 @@ function triageRecord(item) {
   const raw = bucket && bucket[item.id];
   const statuses = ["resolved", "ignored", "true-positive"];
   const severities = ["Critical", "High", "Medium", "Low"];
-  if (statuses.includes(raw)) return { status: raw, needsReview: false, severity: "" };
+  const tracks = ["confirmed", "in-remediation", "mitigated", "remediated"];
+  if (statuses.includes(raw)) return { status: raw, needsReview: false, severity: "", track: "" };
   if (raw && typeof raw === "object") {
     return {
       status: statuses.includes(raw.status) ? raw.status : "",
       needsReview: raw.needsReview === true,
       severity: severities.includes(raw.severity) ? raw.severity : "",
+      track: tracks.includes(raw.track) ? raw.track : "",
     };
   }
-  return { status: "", needsReview: false, severity: "" };
+  return { status: "", needsReview: false, severity: "", track: "" };
 }
 
 function shownPriority(item) {
@@ -704,14 +707,18 @@ function triageStatus(item) {
 function writeTriage(repo, hotId, mark) {
   if (!state.triage[repo]) state.triage[repo] = {};
   const severities = ["Critical", "High", "Medium", "Low"];
+  const tracks = ["confirmed", "in-remediation", "mitigated", "remediated"];
   const severity = severities.includes(mark.severity) ? mark.severity : "";
-  if (!mark.status && !mark.needsReview && !severity) delete state.triage[repo][hotId];
-  else if (mark.status && !mark.needsReview && !severity) state.triage[repo][hotId] = mark.status;
+  const prior = triageRecord({ id: hotId }).track;
+  const track = tracks.includes(mark.track) ? mark.track : mark.track === "" ? "" : prior;
+  if (!mark.status && !mark.needsReview && !severity && !track) delete state.triage[repo][hotId];
+  else if (mark.status && !mark.needsReview && !severity && !track) state.triage[repo][hotId] = mark.status;
   else {
     const next = {};
     if (mark.status) next.status = mark.status;
     if (mark.needsReview) next.needsReview = true;
     if (severity) next.severity = severity;
+    if (track) next.track = track;
     state.triage[repo][hotId] = next;
   }
   if (!Object.keys(state.triage[repo]).length) delete state.triage[repo];

@@ -14,6 +14,7 @@ const uiRoot = path.resolve(__dirname, "ui");
 const sessionPath = path.resolve(__dirname, "data", "session.json");
 const scansDir = path.resolve(__dirname, "data", "scans");
 const appPage = "/GottSecurity/HotspotAnalysis/Index.html";
+const statusPage = "/GottSecurity/HotspotAnalysis/Status.html";
 const catalog = toClientCatalog();
 const options = parseArgs(process.argv);
 const CHOICES = {
@@ -201,21 +202,25 @@ function defaultSession() {
 function normalizeMark(value) {
   const statuses = ["resolved", "ignored", "true-positive"];
   const severities = ["Critical", "High", "Medium", "Low"];
+  const tracks = ["confirmed", "in-remediation", "mitigated", "remediated"];
   let status = "";
   let needsReview = false;
   let severity = "";
+  let track = "";
   if (statuses.includes(value)) status = value;
   else if (value && typeof value === "object" && !Array.isArray(value)) {
     if (statuses.includes(value.status)) status = value.status;
     needsReview = value.needsReview === true;
     if (severities.includes(value.severity)) severity = value.severity;
+    if (tracks.includes(value.track)) track = value.track;
   }
-  if (!status && !needsReview && !severity) return null;
-  if (!needsReview && !severity) return status;
+  if (!status && !needsReview && !severity && !track) return null;
+  if (!needsReview && !severity && !track) return status;
   const mark = {};
   if (status) mark.status = status;
   if (needsReview) mark.needsReview = true;
   if (severity) mark.severity = severity;
+  if (track) mark.track = track;
   return mark;
 }
 
@@ -547,6 +552,11 @@ const server = http.createServer(async (req, res) => {
       send(res, 200, page, "text/html; charset=utf-8");
       return;
     }
+    if (req.method === "GET" && url.pathname === statusPage) {
+      const page = await fs.promises.readFile(path.join(uiRoot, "status.html"));
+      send(res, 200, page, "text/html; charset=utf-8");
+      return;
+    }
     if (req.method !== "GET") {
       sendJson(res, 405, { error: "Method not allowed." });
       return;
@@ -574,6 +584,7 @@ server.on("error", (err) => {
 
 server.listen(options.port, "127.0.0.1", () => {
   console.log(`Security Hotspot Analysis at http://127.0.0.1:${options.port}${appPage}`);
+  console.log(`Status tracking at http://127.0.0.1:${options.port}${statusPage}`);
   console.log("Passive mode does not read a repository. Active scan runs only when you ask.");
   if (options.repo) console.log(`Default repo path: ${options.repo}`);
 });

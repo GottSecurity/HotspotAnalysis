@@ -24,6 +24,8 @@ node server.js --repo "C:\code\interview-repo"
 
 Open [http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Index.html](http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Index.html). The server root redirects there.
 
+The status sheet is [http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Status.html](http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Status.html). It lists the saved scan like a spreadsheet: finding name, file, line, synopsis, general and specific remediation, and a status.
+
 Use `--port` to change the port. The server listens on `127.0.0.1` only.
 
 ## Modes

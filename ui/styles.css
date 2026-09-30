@@ -252,7 +252,14 @@ main {
 .center-tools {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   margin: 0 0 12px;
+}
+
+a.ghost {
+  display: inline-block;
+  color: var(--text);
+  text-decoration: none;
 }
 
 .browser {
@@ -728,6 +735,82 @@ button.loc {
 }
 
 .meta { color: var(--muted); margin: 8px 0 0; }
+
+.sheet-page {
+  min-height: 100vh;
+  padding: 20px 24px 48px;
+}
+
+.sheet-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-end;
+  margin-bottom: 14px;
+}
+
+.sheet-head h1 { margin: 0; font-size: 28px; }
+
+.sheet-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 12px 0;
+}
+
+.sheet-tools input,
+.sheet-tools select { min-width: 180px; }
+
+.sheet-scroll { overflow: auto; }
+
+.sheet-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  min-width: 1100px;
+}
+
+.sheet-table th,
+.sheet-table td {
+  border: 1px solid var(--line);
+  padding: 6px 8px;
+  vertical-align: top;
+  text-align: left;
+}
+
+.sheet-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #1c1712;
+  color: var(--gold);
+  font-weight: 650;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sheet-table tbody tr:nth-child(even) { background: #101820; }
+.sheet-table tbody tr:nth-child(odd) { background: #0c121a; }
+
+.sheet-table .col-line { width: 4.5em; white-space: nowrap; }
+.sheet-table .col-status { width: 11em; }
+.sheet-table select { min-width: 0; width: 100%; padding: 4px 6px; }
+
+.sheet-table select.track-needs-review { background: #645488; color: #f4f7fb; }
+.sheet-table select.track-confirmed { background: #5c4150; color: #f3c6d1; }
+.sheet-table select.track-in-remediation { background: #3a3018; color: var(--gold); }
+.sheet-table select.track-mitigated { background: #14343a; color: var(--teal); }
+.sheet-table select.track-remediated { background: #161a20; color: #8e97a3; }
+
+.sheet-table button.loc {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--teal);
+  text-align: left;
+  text-decoration: underline;
+}
 
 @media (max-width: 800px) {
   .top { flex-direction: column; }
