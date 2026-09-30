@@ -3,7 +3,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { execFile } = require("child_process");
+const { execFile, spawn } = require("child_process");
 const { assertCatalog, toClientCatalog, CATEGORIES, PRIORITIES } = require("./library/catalog");
 const { scanRepo } = require("./scanner/scan");
 
@@ -303,6 +303,110 @@ async function handleSession(req, res) {
   sendJson(res, 200, await writeSession(payload));
 }
 
+function registryValue(key) {
+  return new Promise((resolve) => {
+    execFile("reg", ["query", key, "/ve"], { windowsHide: true, timeout: 5000 }, (err, stdout) => {
+      if (err || typeof stdout !== "string") {
+        resolve("");
+        return;
+      }
+      const match = stdout.match(/REG_SZ\s+(.+)/);
+      resolve(match ? match[1].trim() : "");
+    });
+  });
+}
+
+let notepadExe = "";
+
+async function findNotepad() {
+  if (notepadExe) return notepadExe;
+  const appPath = await registryValue("HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\notepad++.exe");
+  const installDir = await registryValue("HKLM\\SOFTWARE\\Notepad++");
+  const candidates = [
+    appPath,
+    installDir ? path.join(installDir, "notepad++.exe") : "",
+    path.join(process.env.ProgramFiles || "C:\\Program Files", "Notepad++", "notepad++.exe"),
+    path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Notepad++", "notepad++.exe"),
+    path.join(process.env.LOCALAPPDATA || "", "Programs", "Notepad++", "notepad++.exe"),
+  ].filter(Boolean);
+  for (const candidate of candidates) {
+    try {
+      const stat = await fs.promises.stat(candidate);
+      if (stat.isFile()) {
+        notepadExe = candidate;
+        return notepadExe;
+      }
+    } catch (err) {
+      // Try the next install location.
+    }
+  }
+  throw new Error("Notepad++ was not found.");
+}
+
+async function fileInsideRepo(repoInput, relInput) {
+  if (typeof repoInput !== "string" || typeof relInput !== "string") {
+    throw new Error("Send the scanned folder and a file path.");
+  }
+  if (repoInput.includes("\0") || relInput.includes("\0")) throw new Error("That file path is not valid.");
+  const rel = relInput.trim();
+  if (!rel || path.isAbsolute(rel)) throw new Error("That file path is not valid.");
+  const root = path.resolve(repoInput.trim());
+  if (root === path.parse(root).root) throw new Error("Refusing to open a file from a drive root.");
+  const rootStat = await fs.promises.stat(root);
+  if (!rootStat.isDirectory()) throw new Error("Repository path is not a directory.");
+  const abs = path.resolve(root, rel);
+  const relative = path.relative(root, abs);
+  if (!relative || relative.startsWith("..") || path.isAbsolute(relative)) {
+    throw new Error("That file is outside the scanned folder.");
+  }
+  const realRoot = await fs.promises.realpath(root);
+  const realFile = await fs.promises.realpath(abs);
+  const fromRoot = path.relative(realRoot, realFile);
+  if (!fromRoot || fromRoot.startsWith("..") || path.isAbsolute(fromRoot)) {
+    throw new Error("That file is outside the scanned folder.");
+  }
+  const stat = await fs.promises.stat(realFile);
+  if (!stat.isFile()) throw new Error("That path is not a file.");
+  return realFile;
+}
+
+function launchNotepad(exe, file, line) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(exe, [`-n${line}`, file], { detached: true, stdio: "ignore", windowsHide: true });
+    child.once("error", reject);
+    child.once("spawn", () => {
+      child.unref();
+      resolve();
+    });
+  });
+}
+
+async function handleOpen(req, res) {
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(req));
+  } catch (err) {
+    sendJson(res, 400, { error: "Send the file to open as JSON." });
+    return;
+  }
+  const line = Number(payload && payload.line);
+  if (!Number.isInteger(line) || line < 1 || line > 1_000_000) {
+    sendJson(res, 400, { error: "That line number is not valid." });
+    return;
+  }
+  try {
+    const file = await fileInsideRepo(payload.repo, payload.file);
+    const exe = await findNotepad();
+    await launchNotepad(exe, file, line);
+    sendJson(res, 200, { ok: true });
+  } catch (err) {
+    const missing = err && err.code === "ENOENT";
+    sendJson(res, 400, {
+      error: missing ? "That file was not found." : err.message || "Notepad++ could not open that file.",
+    });
+  }
+}
+
 async function handleScan(req, res) {
   let payload;
   try {
@@ -348,6 +452,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && url.pathname === "/api/scan") {
       await handleScan(req, res);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/api/open") {
+      await handleOpen(req, res);
       return;
     }
     if (req.method === "GET" && url.pathname === "/favicon.ico") {

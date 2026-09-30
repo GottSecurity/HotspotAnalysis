@@ -796,7 +796,9 @@ function hotspotHtml(item) {
           ${item.sourceToSink ? `<span class="flag">Source nearby</span>` : ""}
           ${record.needsReview ? `<span class="flag">Needs review</span>` : ""}
         </span>
-        <span class="loc">${esc(item.file)}:${item.line}</span>
+      </button>
+      <button type="button" class="loc" data-action="open-file" data-file="${esc(item.file)}" data-line="${item.line}" title="Open this line in Notepad++">${esc(item.file)}:${item.line}</button>
+      <button type="button" class="hot-more" data-action="toggle-hot" aria-expanded="false">
         <span class="hot-match">${esc(item.match)}</span>
         <span class="hot-why">${esc(item.why)}</span>
       </button>
@@ -860,6 +862,26 @@ function paintScanChrome() {
   }
 }
 
+async function openInNotepad(button) {
+  const repo = state.scan && state.scan.repoRoot;
+  const file = button.dataset.file;
+  const line = Number(button.dataset.line);
+  const error = document.getElementById("scan-error");
+  if (!repo || !file || !Number.isInteger(line)) return;
+  try {
+    const response = await fetch("/api/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo, file, line }),
+    });
+    const payload = await response.json();
+    if (!response.ok) throw new Error(payload.error || "Notepad++ could not open that file.");
+    if (error) error.textContent = "";
+  } catch (err) {
+    if (error) error.textContent = err.message || "Notepad++ could not open that file.";
+  }
+}
+
 async function onClick(event) {
   const button = event.target.closest("[data-action]");
   if (!button) return;
@@ -879,11 +901,18 @@ async function onClick(event) {
     state.open[button.dataset.step] = willOpen;
     return;
   }
+  if (action === "open-file") {
+    await openInNotepad(button);
+    return;
+  }
   if (action === "toggle-hot") {
-    const body = button.closest(".hot").querySelector(".hot-body");
+    const hot = button.closest(".hot");
+    const body = hot.querySelector(".hot-body");
     const willOpen = body.hidden;
     body.hidden = !willOpen;
-    button.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    hot.querySelectorAll("[data-action='toggle-hot']").forEach((item) => {
+      item.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    });
     return;
   }
   if (action === "mark") {
