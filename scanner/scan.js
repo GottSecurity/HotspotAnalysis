@@ -86,7 +86,7 @@ function classify(rel, text) {
 function applies(family, search) {
   if (search.active === false) return false;
   if (family === "config") return search.onConfig === true;
-  if (family === "node") return search.languages.includes("node");
+  if (family === "node") return search.languages.includes("node") || search.languages.includes("javascript");
   if (family === "java") return search.languages.includes("java");
   if (family === "spring") {
     return search.languages.includes("spring") || search.languages.includes("java");
@@ -247,7 +247,10 @@ function languageMatch(hotspot, selected) {
   if (hotspot.language === "config") {
     return hotspot.tags.includes(selected) || (selected === "spring" && hotspot.tags.includes("java"));
   }
-  if (selected === "node") return hotspot.language === "node";
+  if (selected === "node") return hotspot.language === "node" && hotspot.tags.includes("node");
+  if (selected === "javascript") {
+    return hotspot.tags.includes("javascript") && (hotspot.language === "node" || hotspot.language === "javascript");
+  }
   if (selected === "java") {
     return hotspot.language === "java" || (hotspot.language === "spring" && hotspot.tags.includes("java"));
   }

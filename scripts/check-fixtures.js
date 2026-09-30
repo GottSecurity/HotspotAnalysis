@@ -80,6 +80,24 @@ async function main() {
   if (!has((item) => item.file.includes("python-sample") && item.category === "Command Injection")) {
     fail("Expected a Python command execution match");
   }
+  if (!has((item) => item.file.includes("js-sample") && item.title === "Browser location and document sources")) {
+    fail("Expected a browser location source");
+  }
+  if (!has((item) => item.file.includes("js-sample") && item.title === "DOM HTML insertion" && item.match.includes("insertAdjacentHTML"))) {
+    fail("Expected a DOM HTML sink");
+  }
+  if (!has((item) => item.file.includes("js-sample") && item.title === "postMessage handlers")) {
+    fail("Expected a postMessage match");
+  }
+  if (!has((item) => item.file.includes("js-sample") && item.title === "Browser location changes")) {
+    fail("Expected a browser redirect");
+  }
+  if (!has((item) => item.file.includes("js-sample") && item.title === "Prototype pollution")) {
+    fail("Expected a prototype pollution match");
+  }
+  if (!has((item) => item.file.includes("js-sample") && item.title === "eval and Function")) {
+    fail("Expected a JavaScript eval match");
+  }
   if (!has((item) => item.category === "Command Injection" && item.file.includes("java-sample"))) {
     fail("Expected a Java command execution match");
   }

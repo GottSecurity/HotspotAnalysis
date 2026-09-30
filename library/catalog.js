@@ -13,6 +13,7 @@ const DISCLAIMER =
 const LANGUAGES = [
   { id: "all", label: "All" },
   { id: "node", label: "Node.js" },
+  { id: "javascript", label: "JavaScript" },
   { id: "java", label: "Java" },
   { id: "spring", label: "Spring / Spring Boot" },
   { id: "python", label: "Python" },
@@ -105,6 +106,45 @@ const STEPS = [
         verify: "Open the handler and follow each request value to the next function.",
         secureAlternative:
           "Validate and allow-list input at the boundary, then pass only the fields the handler needs.",
+      }),
+      search({
+        id: "js-dom-source",
+        languages: ["javascript"],
+        category: "External entry points",
+        title: "Browser location and document sources",
+        role: "source",
+        priority: "High",
+        rank: 20,
+        keywords: ["location.search", "location.hash", "document.URL", "document.referrer", "URLSearchParams", "window.name"],
+        regex:
+          "\\b(location\\.(search|hash)|document\\.(URL|documentURI|referrer)|window\\.name|URLSearchParams)\\b",
+        why: "These values come from the address bar, the previous page, or another window. Treat them as untrusted input in browser code.",
+        whatToCheck:
+          "Follow the value into HTML, a redirect, storage, or a message to another window.",
+        falsePositives:
+          "Reading location.hash only to scroll to a constant section id.",
+        verify: "Open the next call that uses the value before deciding it is safe.",
+        secureAlternative:
+          "Parse the value into an allow-listed id. Do not write it into HTML or a URL.",
+      }),
+      search({
+        id: "js-postmessage",
+        languages: ["javascript"],
+        category: "External entry points",
+        title: "postMessage handlers",
+        role: "review",
+        priority: "High",
+        rank: 20,
+        keywords: ["postMessage", "message", "event.origin"],
+        regex: "\\bpostMessage\\s*\\(|addEventListener\\s*\\(\\s*[\"']message[\"']",
+        why: "A message handler accepts data from another window. A postMessage call chooses who receives it.",
+        whatToCheck:
+          "On a handler, confirm event.origin is checked before the data is used. On a send, confirm the target origin is a specific site, not *.",
+        falsePositives:
+          "A message listener that ignores event.data, or a postMessage to a known origin.",
+        verify: "Stay on the handler if origin is not compared before the data reaches HTML, storage, or eval.",
+        secureAlternative:
+          "Check event.origin against an allow-list. Pass a specific target origin to postMessage.",
       }),
       search({
         id: "spring-entry",
@@ -955,7 +995,7 @@ const STEPS = [
     searches: [
       search({
         id: "node-ssrf",
-        languages: ["node"],
+        languages: ["node", "javascript"],
         category: "SSRF",
         title: "Node outbound HTTP",
         role: "sink",
@@ -1062,6 +1102,46 @@ const STEPS = [
         secureAlternative:
           "Allow-list destinations. Do not pass a request URL straight to requests, httpx, or urlopen.",
       }),
+      search({
+        id: "js-redirect",
+        languages: ["javascript"],
+        category: "Open Redirect",
+        title: "Browser location changes",
+        role: "sink",
+        priority: "High",
+        rank: 17,
+        top: true,
+        keywords: ["location.href", "location.assign", "location.replace", "window.open"],
+        regex: "\\blocation\\.href\\s*=|\\blocation\\.(assign|replace)\\s*\\(|\\bwindow\\.open\\s*\\(",
+        why: "Assigning location or opening a window sends the browser to a URL. A value from the query string can leave the site.",
+        whatToCheck:
+          "See whether the URL is a constant path or comes from location.search, document.referrer, or a message.",
+        falsePositives:
+          "location.href = '/login' and other constant relative paths.",
+        verify: "A caller-supplied absolute URL, or a protocol-relative URL, can send the browser off site.",
+        secureAlternative:
+          "Accept only relative paths on an allow-list, or map a short code to a page the script already knows.",
+      }),
+      search({
+        id: "js-websocket",
+        languages: ["javascript"],
+        category: "SSRF",
+        title: "WebSocket constructor",
+        role: "sink",
+        priority: "Medium",
+        rank: 7,
+        top: true,
+        keywords: ["WebSocket"],
+        regex: "\\bnew\\s+WebSocket\\s*\\(",
+        why: "The WebSocket URL is a network target. A caller-controlled URL chooses the server the browser talks to.",
+        whatToCheck:
+          "See whether the URL is a constant or is built from location, a query parameter, or a message.",
+        falsePositives:
+          "new WebSocket of a fixed wss URL for the same application.",
+        verify: "Stay on the call if the host comes from input.",
+        secureAlternative:
+          "Use a fixed WebSocket URL. Do not let the page choose the host.",
+      }),
     ],
   },
   {
@@ -1077,7 +1157,7 @@ const STEPS = [
     searches: [
       search({
         id: "node-dynamic",
-        languages: ["node"],
+        languages: ["node", "javascript"],
         category: "Deserialization",
         title: "eval and Function",
         role: "sink",
@@ -1241,7 +1321,7 @@ const STEPS = [
     searches: [
       search({
         id: "node-xss",
-        languages: ["node"],
+        languages: ["node", "javascript"],
         category: "XSS",
         title: "HTML sinks",
         role: "sink",
@@ -1307,6 +1387,27 @@ const STEPS = [
         verify: "render_template_string of request data is the case to stay on.",
         secureAlternative:
           "Render a file template and leave autoescape on. Do not mark request data as safe HTML.",
+      }),
+      search({
+        id: "js-dom-sink",
+        languages: ["javascript"],
+        category: "XSS",
+        title: "DOM HTML insertion",
+        role: "sink",
+        priority: "High",
+        rank: 11,
+        top: true,
+        keywords: ["insertAdjacentHTML", "document.writeln", "setTimeout", "setInterval", ".html("],
+        regex:
+          "\\binsertAdjacentHTML\\b|\\bdocument\\.writeln\\b|\\b(setTimeout|setInterval)\\s*\\(\\s*[\"'`]|\\.html\\s*\\(",
+        why: "These calls turn a string into HTML or into code. A string from the page URL or a message is an XSS review.",
+        whatToCheck:
+          "See whether the argument includes location, document.referrer, stored user content, or event.data.",
+        falsePositives:
+          "insertAdjacentHTML of a constant fragment, or setTimeout of a function rather than a string. A function does not match this pattern.",
+        verify: "HTML text encoding does not make a string safe inside an event handler attribute or a URL.",
+        secureAlternative:
+          "Use textContent for text. Pass functions to setTimeout and setInterval, not strings.",
       }),
     ],
   },
@@ -1403,6 +1504,26 @@ const STEPS = [
         secureAlternative:
           "Copy an allow-list of fields. Do not spread the request into a model create or update.",
       }),
+      search({
+        id: "js-proto",
+        languages: ["javascript"],
+        category: "Mass Assignment",
+        title: "Prototype pollution",
+        role: "sink",
+        priority: "High",
+        rank: 12,
+        top: true,
+        keywords: ["__proto__", "constructor.prototype", "prototype"],
+        regex: "__proto__|constructor\\s*\\[\\s*[\"']prototype[\"']\\s*\\]",
+        why: "Writing __proto__ or constructor.prototype can change objects across the page.",
+        whatToCheck:
+          "See whether the key or the value comes from a query string, JSON, or a message that the caller controls.",
+        falsePositives:
+          "A literal __proto__ read in a polyfill that does not assign a caller-supplied object.",
+        verify: "Merging parsed query or JSON objects into {} is the case to stay on.",
+        secureAlternative:
+          "Copy an allow-list of keys. Reject __proto__ and constructor before a merge.",
+      }),
     ],
   },
   {
@@ -1418,7 +1539,7 @@ const STEPS = [
     searches: [
       search({
         id: "weak-crypto",
-        languages: ["node", "java", "spring", "python"],
+        languages: ["node", "java", "spring", "python", "javascript"],
         category: "Cryptography",
         title: "Weak hash, cipher, or random API",
         role: "review",
@@ -1531,6 +1652,27 @@ const STEPS = [
         verify: "Session identifiers should not be readable by script and should not be sent on plain HTTP.",
         secureAlternative:
           "Set httponly, secure, and samesite on session cookies. Load the signing key from the environment.",
+      }),
+      search({
+        id: "js-storage",
+        languages: ["javascript"],
+        category: "Session / Cookies",
+        title: "Browser storage and cookies",
+        role: "review",
+        priority: "Medium",
+        rank: 14,
+        top: true,
+        keywords: ["localStorage", "sessionStorage", "document.cookie", "document.domain"],
+        regex:
+          "\\b(localStorage|sessionStorage)\\.(getItem|setItem)\\b|document\\.cookie\\s*=|document\\.domain\\s*=",
+        why: "Browser storage and document.cookie are readable by script on the page. document.domain widens which pages share the origin.",
+        whatToCheck:
+          "See whether a token, session id, or personal data is written here. Confirm document.domain is not relaxed to a parent site.",
+        falsePositives:
+          "localStorage of a non-sensitive UI preference.",
+        verify: "A session token in localStorage is exposed to every script on the origin.",
+        secureAlternative:
+          "Keep session tokens in HttpOnly cookies. Do not set document.domain.",
       }),
     ],
   },

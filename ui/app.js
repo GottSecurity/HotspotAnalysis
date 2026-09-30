@@ -44,6 +44,7 @@ const state = {
   scan: null,
   scanning: false,
   scanError: "",
+  history: [],
   open: {},
   marks: loadMarks(),
   leftOpen: true,
@@ -76,6 +77,8 @@ async function load() {
     ]);
     state.catalog = await libraryResponse.json();
     applySession(await sessionResponse.json());
+    await refreshHistory();
+    if (state.repo) await restoreScan(state.repo);
     renderShell();
   } catch (err) {
     app.textContent = "The review guide could not be loaded. Start it with node server.js and open http://127.0.0.1:3000.";
@@ -254,7 +257,7 @@ function brandHtml() {
   return `
     <header class="brand">
       <h1>Security Hotspot Navigator</h1>
-      <p class="lede">A local review guide for Node.js, Java, Spring, and Python. Work the checklist in order, and paste each regex into your editor.</p>
+      <p class="lede">A local review guide for Node.js, JavaScript, Java, Spring, and Python. Work the checklist in order, and paste each regex into your editor.</p>
       <p class="disclaimer">${esc(state.catalog.disclaimer)}</p>
     </header>
   `;
@@ -323,6 +326,7 @@ function activeControls() {
         <button type="button" class="ghost" data-action="browse-open">Browse</button>
         <button type="button" class="primary" id="scan-button" data-action="scan">Scan</button>
       </div>
+      ${historyField()}
       <p class="meta" id="scan-meta">Active mode reads files and runs the same regexes. It does not lint, modify, or rewrite anything.</p>
       <p class="error" id="scan-error"></p>
     </section>
@@ -365,6 +369,24 @@ function activeControls() {
       <p class="meta" id="session-status"></p>
     </section>
     ${progressHtml()}
+  `;
+}
+
+function historyField() {
+  const current = state.scan && state.scan.repoRoot;
+  const options = state.history
+    .map((item) => {
+      const selected = item.repo === current ? " selected" : "";
+      return `<option value="${esc(item.repo)}"${selected}>${esc(item.repo)} · ${item.hotspotCount} matches</option>`;
+    })
+    .join("");
+  return `
+    <label class="field">Recent projects
+      <select id="repo-history">
+        <option value="">Switch saved project</option>
+        ${options}
+      </select>
+    </label>
   `;
 }
 
@@ -427,6 +449,9 @@ function renderGuide() {
     }
     if (state.language === "python") {
       hint.textContent += " Python review covers Flask, Django, and FastAPI request entry, queries, commands, and template output.";
+    }
+    if (state.language === "javascript") {
+      hint.textContent += " JavaScript review covers browser sources, DOM HTML writes, redirects, postMessage, storage, and prototype pollution.";
     }
   }
   ensureCurrentStep();
@@ -743,7 +768,10 @@ function activeLanguage(item) {
   if (item.language === "config") {
     return item.tags.includes(state.language) || (state.language === "spring" && item.tags.includes("java"));
   }
-  if (state.language === "node") return item.language === "node";
+  if (state.language === "node") return item.language === "node" && item.tags.includes("node");
+  if (state.language === "javascript") {
+    return item.tags.includes("javascript") && (item.language === "node" || item.language === "javascript");
+  }
   if (state.language === "java") {
     return item.language === "java" || (item.language === "spring" && item.tags.includes("java"));
   }
@@ -829,6 +857,7 @@ function hotspotHtml(item) {
 
 function languageName(id) {
   if (id === "node") return "Node.js";
+  if (id === "javascript") return "JavaScript";
   if (id === "java") return "Java";
   if (id === "spring") return "Spring / Spring Boot";
   if (id === "python") return "Python";
@@ -861,7 +890,8 @@ function paintScanChrome() {
   if (!meta) return;
   if (state.scan) {
     const trimmed = state.scan.truncated ? " Results were capped." : "";
-    meta.textContent = `Scanned ${state.scan.filesScanned} files. ${state.scan.hotspotCount} matches in ${state.scan.repoRoot}.${trimmed} Reading only. Nothing was modified.`;
+    const saved = state.scan.savedAt ? " Loaded from the saved scan." : "";
+    meta.textContent = `Scanned ${state.scan.filesScanned} files. ${state.scan.hotspotCount} matches in ${state.scan.repoRoot}.${trimmed}${saved} Reading only. Nothing was modified.`;
   } else if (!state.scanning) {
     meta.textContent = "Active mode reads files and runs the same regexes. It does not lint, modify, or rewrite anything.";
   }
@@ -1118,7 +1148,16 @@ function onChange(event) {
   else if (id === "only-linked") state.linked = event.target.checked;
   else if (id === "hide-resolved") state.hideResolved = event.target.checked;
   else if (id === "hide-ignored") state.hideIgnored = event.target.checked;
-  else return;
+  else if (id === "repo-history") {
+    if (!event.target.value) return;
+    state.repo = event.target.value;
+    scheduleSave();
+    restoreScan(state.repo).then((ok) => {
+      if (!ok) state.scanError = "No saved scan for that folder.";
+      renderActiveList();
+    });
+    return;
+  } else return;
   state.holdClosed = false;
   scheduleSave();
   if (state.mode === "passive") renderGuide();
@@ -1140,6 +1179,31 @@ function onInput(event) {
   else renderActiveList();
 }
 
+async function refreshHistory() {
+  try {
+    const response = await fetch("/api/scans");
+    state.history = response.ok ? await response.json() : [];
+    if (!Array.isArray(state.history)) state.history = [];
+  } catch (err) {
+    state.history = [];
+  }
+}
+
+async function restoreScan(repo) {
+  try {
+    const response = await fetch(`/api/scans?repo=${encodeURIComponent(repo)}`);
+    if (!response.ok) return false;
+    const body = await response.json();
+    if (!body || typeof body.repoRoot !== "string" || !Array.isArray(body.hotspots)) return false;
+    state.scan = body;
+    state.repo = body.repoRoot;
+    state.scanError = "";
+    return true;
+  } catch (err) {
+    return false;
+  }
+}
+
 async function runScan() {
   state.scanning = true;
   state.scanError = "";
@@ -1157,6 +1221,7 @@ async function runScan() {
     } else {
       state.scan = body;
       state.scanError = "";
+      await refreshHistory();
     }
   } catch (err) {
     state.scan = null;

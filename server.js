@@ -3,6 +3,7 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { execFile, spawn } = require("child_process");
 const { assertCatalog, toClientCatalog, CATEGORIES, PRIORITIES } = require("./library/catalog");
 const { scanRepo } = require("./scanner/scan");
@@ -11,11 +12,12 @@ assertCatalog();
 
 const uiRoot = path.resolve(__dirname, "ui");
 const sessionPath = path.resolve(__dirname, "data", "session.json");
+const scansDir = path.resolve(__dirname, "data", "scans");
 const catalog = toClientCatalog();
 const options = parseArgs(process.argv);
 const CHOICES = {
   mode: ["passive", "active"],
-  language: ["all", "node", "java", "spring", "python"],
+  language: ["all", "node", "javascript", "java", "spring", "python"],
   searchType: ["all", "keywords", "regex", "checklist"],
   tool: ["vscode", "notepad", "ripgrep"],
   sort: ["priority", "confidence", "category", "file", "step", "line"],
@@ -407,6 +409,68 @@ async function handleOpen(req, res) {
   }
 }
 
+function scanFileId(repoRoot) {
+  return crypto.createHash("sha256").update(repoRoot).digest("hex").slice(0, 24);
+}
+
+async function readScanIndex() {
+  try {
+    const raw = JSON.parse(await fs.promises.readFile(path.join(scansDir, "index.json"), "utf8"));
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((item) => item && typeof item.repo === "string" && item.repo.length <= 1024)
+      .slice(0, 20)
+      .map((item) => ({
+        repo: item.repo,
+        savedAt: typeof item.savedAt === "string" ? item.savedAt : "",
+        filesScanned: Number(item.filesScanned) || 0,
+        hotspotCount: Number(item.hotspotCount) || 0,
+      }));
+  } catch (err) {
+    return [];
+  }
+}
+
+async function rememberScan(result) {
+  await fs.promises.mkdir(scansDir, { recursive: true });
+  const savedAt = new Date().toISOString();
+  const stored = { ...result, savedAt };
+  await fs.promises.writeFile(path.join(scansDir, `${scanFileId(result.repoRoot)}.json`), JSON.stringify(stored));
+  const index = (await readScanIndex()).filter((item) => item.repo !== result.repoRoot);
+  index.unshift({
+    repo: result.repoRoot,
+    savedAt,
+    filesScanned: result.filesScanned,
+    hotspotCount: result.hotspotCount,
+  });
+  await fs.promises.writeFile(path.join(scansDir, "index.json"), JSON.stringify(index.slice(0, 20), null, 2));
+}
+
+async function loadSavedScan(repoInput) {
+  if (typeof repoInput !== "string" || !repoInput.trim() || repoInput.includes("\0")) {
+    throw new Error("That folder path is not valid.");
+  }
+  const root = path.resolve(repoInput.trim());
+  const raw = JSON.parse(await fs.promises.readFile(path.join(scansDir, `${scanFileId(root)}.json`), "utf8"));
+  if (!raw || raw.repoRoot !== root || !Array.isArray(raw.hotspots)) {
+    throw new Error("That saved scan could not be read.");
+  }
+  return raw;
+}
+
+async function handleScans(req, res, url) {
+  const repo = url.searchParams.get("repo");
+  if (!repo) {
+    sendJson(res, 200, await readScanIndex());
+    return;
+  }
+  try {
+    sendJson(res, 200, await loadSavedScan(repo));
+  } catch (err) {
+    sendJson(res, 404, { error: "No saved scan for that folder." });
+  }
+}
+
 async function handleScan(req, res) {
   let payload;
   try {
@@ -422,6 +486,11 @@ async function handleScan(req, res) {
   }
   try {
     const result = await scanRepo(repo);
+    try {
+      await rememberScan(result);
+    } catch (err) {
+      // The scan result is still returned. The recent-projects list updates on the next successful save.
+    }
     sendJson(res, 200, result);
   } catch (err) {
     const missing = err && err.code === "ENOENT";
@@ -448,6 +517,10 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === "/api/browse") {
       await handleBrowse(req, res, url);
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/api/scans") {
+      await handleScans(req, res, url);
       return;
     }
     if (req.method === "POST" && url.pathname === "/api/scan") {

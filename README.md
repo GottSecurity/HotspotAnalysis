@@ -1,6 +1,6 @@
 # Security Hotspot Navigator
 
-Local review guide for Node.js, Java, Spring Boot, and Python. It runs on your machine and binds to localhost only.
+Local review guide for Node.js, JavaScript, Java, Spring Boot, and Python. It runs on your machine and binds to localhost only.
 
 This tool identifies code that deserves security review. A hotspot is not necessarily a vulnerability.
 
@@ -36,7 +36,8 @@ Spring / Spring Boot review includes the Java searches, Spring Boot patterns, cl
 
 ## Supported languages
 
-- Node.js, JavaScript, and TypeScript
+- Node.js and TypeScript server code
+- Browser JavaScript, including DOM XSS, redirects, postMessage, and storage
 - Java
 - Spring Framework and Spring Boot, including Spring MVC, Spring Security, and Spring HTTP APIs
 - Python, including Flask, Django, and FastAPI
