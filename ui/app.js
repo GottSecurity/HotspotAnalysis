@@ -360,7 +360,7 @@ function activeControls() {
       <div class="check-row">
         <label><input id="only-sinks" type="checkbox"${state.sinks ? " checked" : ""}> Show only likely sinks</label>
         <label><input id="only-sources" type="checkbox"${state.sources ? " checked" : ""}> Show only likely sources</label>
-        <label><input id="only-linked" type="checkbox"${state.linked ? " checked" : ""}> Show source-to-sink candidates</label>
+        <label><input id="only-linked" type="checkbox"${state.linked ? " checked" : ""}> Show sinks with nearby input (flow unverified)</label>
         <label><input id="hide-resolved" type="checkbox"${state.hideResolved ? " checked" : ""}> Hide resolved</label>
         <label><input id="hide-ignored" type="checkbox"${state.hideIgnored ? " checked" : ""}> Hide ignored</label>
       </div>
@@ -605,7 +605,11 @@ function renderActiveList() {
   });
   const matches = state.scan ? filteredHotspots() : [];
   const note = triageNote();
-  list.innerHTML = state.catalog.steps.map((step) => activeStepHtml(step, matches, note)).join("");
+  list.innerHTML = state.view === "top"
+    ? `<section class="step"><div class="step-bar"><h2>Top hotspots</h2></div>
+        <div class="results"><p class="note">Across all checklist categories, subject to the current filters. Up to 20 matches, at most 4 per category. Context still decides the risk.${note}</p>
+        ${!state.scan ? '<p>Choose a repository and scan to see hotspots.</p>' : selectTop(matches).map(hotspotHtml).join("") || '<p>No hotspots match these filters.</p>'}</div></section>`
+    : state.catalog.steps.map((step) => activeStepHtml(step, matches, note)).join("");
   renderLeft();
 }
 
@@ -834,7 +838,7 @@ function hotspotHtml(item) {
           <span class="pri pri-${esc(priority.toLowerCase())}">${esc(priority)}</span>
           <span>${esc(item.category)}</span>
           <span class="conf conf-${esc(item.confidence.toLowerCase())}">Confidence: ${esc(item.confidence)}</span>
-          ${item.sourceToSink ? `<span class="flag">Source nearby</span>` : ""}
+          ${item.sourceToSink ? `<span class="flag">Nearby input, flow unverified</span>` : ""}
           ${record.needsReview ? `<span class="flag">Needs review</span>` : ""}
         </span>
       </button>
@@ -851,7 +855,7 @@ function hotspotHtml(item) {
         <div class="kicker">Why this is sensitive</div>
         <p>${esc(item.why)}</p>
         <div class="kicker">Confidence</div>
-        <p>${esc(CONFIDENCE_NOTE[item.confidence] || "")}</p>
+        <p>${esc(item.sourceToSink ? "A source pattern is within 40 lines. This is proximity only; no value flow or shared execution path has been established." : CONFIDENCE_NOTE[item.confidence] || "")}</p>
         <div class="kicker">What to verify</div>
         <p>${esc(item.whatToCheck)} ${esc(item.verify)}</p>
         <div class="kicker">False positives</div>

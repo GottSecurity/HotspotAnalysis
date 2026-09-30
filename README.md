@@ -52,13 +52,14 @@ External entry points, authentication, authorization / IDOR / BOLA, SQL injectio
 
 Active mode marks a **source** (request data, object ids, request binding) and a **sink** (SQL, commands, files, outbound HTTP, HTML writes, deserialization, and similar).
 
-- **High** confidence: a source and a sink are within 40 lines in the same file.
-- **Medium**: a sink exists and some source exists elsewhere in that file.
-- **Low**: a sensitive API is present, and the match does not show that it is exploitable.
+- **Low** confidence: regex matches alone do not establish exploitability.
+- **Nearby input, flow unverified**: a source pattern is within 40 lines of a sink. This does not establish that the value reaches the sink, even in the same function.
 
 Forty lines is a proximity hint, not data flow. A later AST pass can replace `scanner/sourceSink.js` without changing the page.
 
 Top hotspots shows at most 20 matches and at most 4 from any single category.
+
+After updating scanner rules, run Scan again to refresh saved results. Review decisions remain keyed to their finding IDs.
 
 ## False positives
 

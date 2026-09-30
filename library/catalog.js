@@ -26,6 +26,8 @@ const CATEGORIES = [
   "Authorization / IDOR / BOLA",
   "SQL Injection",
   "NoSQL Injection",
+  "Database query",
+  "Code Execution",
   "Command Injection",
   "XSS",
   "Path Traversal",
@@ -658,17 +660,17 @@ const STEPS = [
       search({
         id: "node-nosql",
         languages: ["node"],
-        category: "NoSQL Injection",
-        title: "NoSQL query operators",
-        role: "sink",
-        priority: "Critical",
+        category: "Database query",
+        title: "Database query methods",
+        role: "review",
+        priority: "Medium",
         rank: 4,
-        top: true,
+        top: false,
         keywords: ["findOne", "findById", "updateOne", "deleteOne", "$where"],
         regex: "\\b(findOne|findById|updateOne|deleteOne|\\$where)\\s*\\(",
-        why: "Potential NoSQL injection sink. A caller-supplied object can change the query operator, not only the value.",
+        why: "Query methods are shared by SQL ORMs and NoSQL drivers. Identify the library and inspect how the query is constructed.",
         whatToCheck:
-          "See whether req.body or a parsed JSON object is passed straight into the driver.",
+          "Identify the database library. Check request types, parameter binding, and supported operators before classifying an injection risk.",
         falsePositives:
           "findById with a server-derived id, or a query object built field by field in code.",
         verify: "Reject operator keys such as $gt, $where, and $ne if they arrived from the client.",
@@ -1158,7 +1160,7 @@ const STEPS = [
       search({
         id: "node-dynamic",
         languages: ["node", "javascript"],
-        category: "Deserialization",
+        category: "Code Execution",
         title: "eval and Function",
         role: "sink",
         priority: "Critical",
@@ -1166,14 +1168,14 @@ const STEPS = [
         top: true,
         keywords: ["eval", "Function", "yaml.load", "unserialize"],
         regex: "\\b(eval|Function)\\s*\\(",
-        why: "Potential code execution sink. eval and the Function constructor compile strings at runtime.",
+        why: "Potential dynamic evaluation. Global eval and Function compile JavaScript; library methods named eval have different semantics and require library-specific review.",
         whatToCheck:
           "See whether the string includes any request data, stored content a caller created, or a file the caller can change.",
         falsePositives:
           "Neither API is a safe parser for JSON. JSON.parse is the usual intent and will not match this pattern.",
         verify: "Assume the match deserves a close read even when the string looks constant.",
         secureAlternative:
-          "Remove eval and Function. Parse JSON with JSON.parse and keep logic in real code.",
+          "Avoid JavaScript string compilation. For expression libraries, check the installed version and restrict available operations. Use JSON.parse for JSON data.",
       }),
       search({
         id: "java-deser",

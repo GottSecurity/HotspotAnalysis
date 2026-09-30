@@ -2,9 +2,8 @@
 
 /**
  * Nearby-line source and sink heuristic.
- * High confidence means a source and a dangerous sink sit within WINDOW lines
- * in the same file. This is not data-flow analysis. An AST pass can replace
- * this module later without changing the hotspot shape.
+ * Proximity is a navigation hint, never evidence of data flow.
+ * Confidence stays Low until stronger analysis can establish a value path.
  */
 
 const WINDOW = 40;
@@ -37,11 +36,11 @@ function correlate(hotspots) {
       }
 
       if (nearest && distance <= WINDOW) {
-        hotspot.confidence = "High";
+        hotspot.confidence = "Low";
         hotspot.sourceToSink = true;
         hotspot.sourcePattern = `${nearest.title} at line ${nearest.line}`;
       } else if (nearest) {
-        hotspot.confidence = "Medium";
+        hotspot.confidence = "Low";
         hotspot.sourcePattern = `${nearest.title} at line ${nearest.line}`;
       } else {
         hotspot.confidence = "Low";
