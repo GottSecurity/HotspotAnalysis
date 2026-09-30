@@ -195,6 +195,27 @@ function defaultSession() {
   };
 }
 
+function normalizeMark(value) {
+  const statuses = ["resolved", "ignored", "true-positive"];
+  const severities = ["Critical", "High", "Medium", "Low"];
+  let status = "";
+  let needsReview = false;
+  let severity = "";
+  if (statuses.includes(value)) status = value;
+  else if (value && typeof value === "object" && !Array.isArray(value)) {
+    if (statuses.includes(value.status)) status = value.status;
+    needsReview = value.needsReview === true;
+    if (severities.includes(value.severity)) severity = value.severity;
+  }
+  if (!status && !needsReview && !severity) return null;
+  if (!needsReview && !severity) return status;
+  const mark = {};
+  if (status) mark.status = status;
+  if (needsReview) mark.needsReview = true;
+  if (severity) mark.severity = severity;
+  return mark;
+}
+
 function normalizeTriage(raw) {
   const triage = {};
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return triage;
@@ -208,9 +229,9 @@ function normalizeTriage(raw) {
     for (const id of Object.keys(bucket)) {
       if (count >= 4000) break;
       const cleanId = textValue(id, 500);
-      const status = bucket[id];
-      if (!cleanId || (status !== "resolved" && status !== "ignored")) continue;
-      next[cleanId] = status;
+      const mark = normalizeMark(bucket[id]);
+      if (!cleanId || !mark) continue;
+      next[cleanId] = mark;
       count += 1;
     }
     if (Object.keys(next).length) triage[cleanRepo] = next;

@@ -14,7 +14,7 @@ const LANGUAGES = [
   { id: "all", label: "All" },
   { id: "node", label: "Node.js" },
   { id: "java", label: "Java" },
-  { id: "spring", label: "Spring Boot" },
+  { id: "spring", label: "Spring / Spring Boot" },
 ];
 
 const CATEGORIES = [
@@ -162,6 +162,32 @@ const STEPS = [
           "Bind a narrow DTO and reject unexpected fields before any security decision.",
       }),
       search({
+        id: "spring-mvc-classic",
+        languages: ["spring"],
+        category: "External entry points",
+        title: "Classic Spring MVC handlers",
+        role: "source",
+        priority: "High",
+        rank: 20,
+        keywords: [
+          "AbstractController",
+          "MultiActionController",
+          "SimpleFormController",
+          "ModelAndView",
+          "DispatcherServlet",
+        ],
+        regex:
+          "\\b(AbstractController|MultiActionController|SimpleFormController|ModelAndView|DispatcherServlet)\\b",
+        why: "Older Spring MVC apps expose requests through controller base classes, ModelAndView, and the dispatcher servlet, not only Boot mapping annotations.",
+        whatToCheck:
+          "List the handler method and the request values it reads. A ModelAndView name can also be a forward or redirect target.",
+        falsePositives:
+          "A dispatcher servlet declaration that only boots the context and never reads request data.",
+        verify: "Open the handleRequest or form method and follow each request value.",
+        secureAlternative:
+          "Prefer explicit request mappings and bind only the fields the handler needs.",
+      }),
+      search({
         id: "java-input",
         languages: ["java"],
         category: "External entry points",
@@ -256,6 +282,33 @@ const STEPS = [
         verify: "List every requestMatchers clause and the rule it applies.",
         secureAlternative:
           "Authenticate by default and permit only the specific public paths you intend.",
+      }),
+      search({
+        id: "spring-security-classic",
+        languages: ["spring"],
+        category: "Authentication",
+        title: "Classic Spring Security rules",
+        role: "review",
+        priority: "High",
+        rank: 20,
+        keywords: [
+          "WebSecurityConfigurerAdapter",
+          "antMatchers",
+          "mvcMatchers",
+          "regexMatchers",
+          "authorizeRequests",
+          "AuthenticationManagerBuilder",
+        ],
+        regex:
+          "\\b(WebSecurityConfigurerAdapter|antMatchers|mvcMatchers|regexMatchers|authorizeRequests|AuthenticationManagerBuilder)\\b",
+        why: "Spring Security 5 and classic Spring apps decide access with WebSecurityConfigurerAdapter and antMatchers. Boot 3 replaced that style with SecurityFilterChain and requestMatchers. Both need the same review.",
+        whatToCheck:
+          "Read authorizeRequests from top to bottom. The first matching antMatchers rule wins.",
+        falsePositives:
+          "An adapter class that is not annotated as a configuration, or a matcher that only names a login page.",
+        verify: "Pair each antMatchers or mvcMatchers path with permitAll, authenticated, or hasRole on that chain.",
+        secureAlternative:
+          "Authenticate by default. Permit only the specific public paths you intend.",
       }),
       search({
         id: "spring-permit-all",
@@ -545,6 +598,26 @@ const STEPS = [
         secureAlternative:
           "Use named or positional parameters. Do not append request strings to SQL.",
       }),
+      search({
+        id: "spring-orm",
+        languages: ["spring"],
+        category: "SQL Injection",
+        title: "Classic Spring ORM queries",
+        role: "sink",
+        priority: "Critical",
+        rank: 4,
+        top: true,
+        keywords: ["NamedParameterJdbcTemplate", "HibernateTemplate", "createSQLQuery"],
+        regex: "\\b(NamedParameterJdbcTemplate|HibernateTemplate|createSQLQuery)\\b",
+        why: "Classic Spring data access can still run SQL that was built as a string. Named parameters are safe only when the SQL text itself stays constant.",
+        whatToCheck:
+          "Read the SQL or HQL argument. Look for concatenation or a request value inside the query text.",
+        falsePositives:
+          "A named-parameter query whose SQL is a constant and whose values are bound with a map or SqlParameterSource.",
+        verify: "The parameter map does not make a concatenated query safe.",
+        secureAlternative:
+          "Keep the SQL text constant and bind values. Do not append request strings.",
+      }),
     ],
   },
   {
@@ -771,6 +844,26 @@ const STEPS = [
         secureAlternative:
           "Accept only relative paths on an allow-list, or map a short code to a server-side destination.",
       }),
+      search({
+        id: "spring-redirect",
+        languages: ["spring"],
+        category: "Open Redirect",
+        title: "Spring view redirects",
+        role: "sink",
+        priority: "Medium",
+        rank: 17,
+        top: true,
+        keywords: ["RedirectView", "redirect:"],
+        regex: "\\bRedirectView\\b|[\"']redirect:",
+        why: "Spring MVC treats a redirect: view name and a RedirectView as a browser redirect. A request value in that target is an open-redirect review.",
+        whatToCheck:
+          "See whether the view name or the RedirectView URL comes from a request parameter such as next or returnUrl.",
+        falsePositives:
+          "redirect:/home and other constant relative paths.",
+        verify: "A caller-supplied absolute URL can send the browser off site.",
+        secureAlternative:
+          "Accept only relative paths on an allow-list, or map a short code to a server-side destination.",
+      }),
     ],
   },
   {
@@ -850,6 +943,26 @@ const STEPS = [
           "Read the next lines for setFeature, setAttribute, or XMLConstants.ACCESS_EXTERNAL_DTD.",
         secureAlternative:
           "Disable DTDs and external entities on the factory before parsing any document that a caller can influence.",
+      }),
+      search({
+        id: "spring-spel",
+        languages: ["spring"],
+        category: "Deserialization",
+        title: "Spring expression evaluation",
+        role: "sink",
+        priority: "Critical",
+        rank: 8,
+        top: true,
+        keywords: ["SpelExpressionParser", "StandardEvaluationContext", "parseExpression"],
+        regex: "\\b(SpelExpressionParser|StandardEvaluationContext|parseExpression)\\b",
+        why: "Spring Expression Language can call methods and constructors when the expression text comes from a request. That is a code-execution review, not a normal template.",
+        whatToCheck:
+          "See whether the expression string is constant or includes a request parameter, header, or body field.",
+        falsePositives:
+          "A constant expression used to read a bean property inside the application.",
+        verify: "StandardEvaluationContext is the more powerful context. SimpleEvaluationContext is the narrower one.",
+        secureAlternative:
+          "Do not parse caller-supplied expressions. If a template is required, use SimpleEvaluationContext and a fixed expression.",
       }),
     ],
   },
@@ -1010,6 +1123,26 @@ const STEPS = [
         verify: "Open the class. Entity annotations or sensitive setters make this a stronger review.",
         secureAlternative:
           "Bind a DTO and copy the allowed fields onto the entity in code.",
+      }),
+      search({
+        id: "spring-form-binding",
+        languages: ["spring"],
+        category: "Mass Assignment",
+        title: "Classic form binding",
+        role: "source",
+        priority: "High",
+        rank: 12,
+        top: true,
+        keywords: ["@ModelAttribute", "@InitBinder", "WebDataBinder", "setAllowedFields"],
+        regex: "@(ModelAttribute|InitBinder)\\b|\\bWebDataBinder\\b",
+        why: "Classic Spring MVC binds request parameters onto a Java object with @ModelAttribute. Every setter on that type can be supplied by the caller unless a binder limits the fields.",
+        whatToCheck:
+          "Open the bound type. Look for role, owner, or status setters. Then look for setAllowedFields or setDisallowedFields on the WebDataBinder.",
+        falsePositives:
+          "A binder that allow-lists the form fields, or a command object that has no sensitive setters.",
+        verify: "A missing @InitBinder on a rich domain object is the case to stay on.",
+        secureAlternative:
+          "Bind a small form object and copy the allowed fields in code, or call setAllowedFields with an explicit list.",
       }),
     ],
   },

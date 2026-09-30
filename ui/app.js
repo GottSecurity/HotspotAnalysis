@@ -191,6 +191,7 @@ function renderShell() {
 }
 
 function renderMain() {
+  if (state.catalog) ensureCurrentStep();
   paintMode();
   paintSides();
   renderLeft();
@@ -235,7 +236,8 @@ function renderLeft() {
         .map((step) => {
           const mark = state.marks[step.id] || "not-reviewed";
           const current = state.currentStep === step.id ? " current" : "";
-          return `<button type="button" class="jump mark-${esc(mark)}${current}" data-action="jump" data-step="${esc(step.id)}"><span class="num">${step.order}</span><span>${esc(step.title)}</span></button>`;
+          const tone = stepTone(step.id);
+          return `<button type="button" class="jump mark-${esc(mark)}${tone ? ` tone-${tone}` : ""}${current}" data-action="jump" data-step="${esc(step.id)}"><span class="num">${step.order}</span><span>${esc(step.title)}</span></button>`;
         })
         .join("")}
     </nav>
@@ -252,7 +254,7 @@ function brandHtml() {
   return `
     <header class="brand">
       <h1>Security Hotspot Navigator</h1>
-      <p class="lede">A local review guide for Node.js, Java, and Spring Boot. Work the checklist in order, and paste each regex into your editor.</p>
+      <p class="lede">A local review guide for Node.js, Java, and Spring. Work the checklist in order, and paste each regex into your editor.</p>
       <p class="disclaimer">${esc(state.catalog.disclaimer)}</p>
     </header>
   `;
@@ -408,43 +410,42 @@ function progressHtml() {
   `;
 }
 
+function ensureCurrentStep() {
+  const steps = state.catalog.steps;
+  if (!steps.length) return;
+  if (!steps.some((step) => step.id === state.currentStep)) state.currentStep = steps[0].id;
+  if (!state.holdClosed && state.open[state.currentStep] === undefined) state.open[state.currentStep] = true;
+}
+
 function renderGuide() {
   const hint = document.getElementById("tool-hint");
   if (hint) {
     const caseNote = " When a pattern says case insensitive, turn off Match case in the editor.";
     hint.textContent = TOOLS[state.tool] + caseNote;
     if (state.language === "spring") {
-      hint.textContent += " Spring Boot review includes the Java searches.";
+      hint.textContent += " Spring review includes the Java searches plus Spring Framework and Spring Boot patterns.";
     }
   }
-  if (!state.holdClosed && state.open.entry === undefined) state.open.entry = true;
-  const steps = visibleSteps();
-  if (!state.holdClosed && narrowed()) {
-    steps.forEach((step) => {
-      state.open[step.id] = true;
-    });
-  }
+  ensureCurrentStep();
   const list = document.getElementById("list");
-  if (!steps.length) {
-    list.innerHTML = `<p class="note">No checklist items match these filters.</p>`;
-    return;
-  }
-  list.innerHTML = steps.map((step) => stepHtml(step)).join("");
+  if (!list) return;
+  list.innerHTML = state.catalog.steps.map((step) => stepHtml(guideStep(step))).join("");
 }
 
-function visibleSteps() {
-  return state.catalog.steps
-    .map((step) => {
-      const searches = step.searches.filter(searchVisible);
-      if (state.searchType === "checklist") {
-        const showAllSteps = state.category === "All" && !state.q.trim() && state.language === "all";
-        if (!searches.length && !showAllSteps) return null;
-        return { ...step, searches: [], searchCount: searches.length };
-      }
-      if (!searches.length) return null;
-      return { ...step, searches, searchCount: searches.length };
-    })
-    .filter(Boolean);
+function guideStep(step) {
+  const searches = step.searches.filter(searchVisible);
+  return { ...step, searches, searchCount: searches.length };
+}
+
+function stepTone(stepId) {
+  if (!state.scan) return "";
+  const items = matchingHotspots().filter((item) => item.stepId === stepId);
+  if (!items.length) return "quiet";
+  const statuses = items.map(triageStatus);
+  const todo = statuses.some((status) => status !== "resolved" && status !== "ignored" && status !== "true-positive");
+  if (todo) return "todo";
+  if (statuses.some((status) => status === "true-positive")) return "open";
+  return "quiet";
 }
 
 function searchVisible(item) {
@@ -473,15 +474,17 @@ function passiveLanguage(item) {
   return item.languages.includes(state.language);
 }
 
-function narrowed() {
-  return state.category !== "All" || state.searchType !== "all" || state.q.trim() !== "" || state.language !== "all";
-}
-
 function stepHtml(step) {
   const open = Boolean(state.open[step.id]);
-  const searches = state.searchType === "checklist" ? "" : step.searches.map(searchHtml).join("");
+  const shown = step.id === state.currentStep;
+  const searches = state.searchType === "checklist"
+    ? ""
+    : step.searches.length
+      ? step.searches.map(searchHtml).join("")
+      : `<p>No searches match these filters.</p>`;
+  const tone = stepTone(step.id);
   return `
-    <section class="step" id="step-${esc(step.id)}">
+    <section class="step${tone ? ` tone-${tone}` : ""}" id="step-${esc(step.id)}" ${shown ? "" : "hidden"}>
       <div class="step-bar">
         <button type="button" class="step-toggle" data-action="toggle-step" data-step="${esc(step.id)}" aria-expanded="${open ? "true" : "false"}">
           <span class="num">${step.order}</span>
@@ -521,8 +524,8 @@ function marksHtml(stepId) {
 }
 
 function searchHtml(item) {
-  const showKeywords = state.searchType === "all" || state.searchType === "keywords";
-  const showRegex = state.searchType === "all" || state.searchType === "regex";
+  const showKeywords = state.mode === "active" || state.searchType === "all" || state.searchType === "keywords";
+  const showRegex = state.mode === "active" || state.searchType === "all" || state.searchType === "regex";
   const caseNote = item.flags && item.flags.includes("i") ? "Case insensitive." : "";
   return `
     <article class="search-card">
@@ -563,60 +566,68 @@ function rgCommand(item) {
 
 function renderActiveList() {
   paintScanChrome();
+  ensureCurrentStep();
   const list = document.getElementById("list");
   if (!list) return;
   document.querySelectorAll("[data-action='view']").forEach((button) => {
     button.setAttribute("aria-pressed", button.dataset.view === state.view ? "true" : "false");
   });
-  if (!state.scan) {
-    list.innerHTML = `<p class="note">Choose a repository and scan when you want matches with file names and line numbers. Until then, this page has not read the filesystem.</p>`;
-    return;
-  }
-  const matches = filteredHotspots();
-  const hidden = triageNote();
-  if (state.view === "top") {
-    const top = selectTop(matches);
-    list.innerHTML = `
-      <p class="note">Up to 20 high-value matches, at most 4 from any one category, so one noisy pattern cannot take the whole list. Context still decides the risk.${hidden}</p>
-      ${top.length ? top.map(hotspotHtml).join("") : `<p class="note">No top hotspots match these filters.</p>`}
-    `;
-    return;
-  }
-  if (state.view === "checklist") {
-    list.innerHTML = (hidden ? `<p class="note">${hidden.trim()}</p>` : "") + state.catalog.steps
-      .map((step) => {
-        const group = matches.filter((item) => item.stepId === step.id);
-        const body = group.length
-          ? group.map(hotspotHtml).join("")
-          : `<p>No regex matches for this step in the current filters. Review it in the editor with the passive guide.</p>`;
-        const open = Boolean(state.open[step.id]);
-        return `
-          <section class="step" id="step-${esc(step.id)}">
-            <div class="step-bar">
-              <button type="button" class="step-toggle" data-action="toggle-step" data-step="${esc(step.id)}" aria-expanded="${open ? "true" : "false"}">
-                <span class="num">${step.order}</span>
-                <span><strong>${esc(step.title)}</strong> <span class="summary">${group.length} matches</span></span>
-              </button>
-              ${marksHtml(step.id)}
-            </div>
-            <div class="step-body" ${open ? "" : "hidden"}>
-              <ol>${step.guidance.map((line) => `<li>${esc(line)}</li>`).join("")}</ol>
-              ${body}
-            </div>
-          </section>
-        `;
-      })
-      .join("");
-    return;
-  }
-  const hint = matches.length > 25
-    ? `<p class="note">${matches.length} matches. Use Top hotspots for a short list, or narrow by category.${hidden}</p>`
-    : hidden
-      ? `<p class="note">${hidden.trim()}</p>`
+  const matches = state.scan ? filteredHotspots() : [];
+  const note = triageNote();
+  list.innerHTML = state.catalog.steps.map((step) => activeStepHtml(step, matches, note)).join("");
+  renderLeft();
+}
+
+function activeStepHtml(step, matches, note) {
+  const shown = step.id === state.currentStep;
+  const open = Boolean(state.open[step.id]);
+  const guide = guideStep(step);
+  const group = state.view === "top" && shown
+    ? selectTop(matches)
+    : matches.filter((item) => item.stepId === step.id);
+  const cards = guide.searches.length
+    ? guide.searches.map(searchHtml).join("")
+    : `<p>No searches match these filters.</p>`;
+  const topNote = state.view === "top" && shown
+    ? `<p class="note">Up to 20 high-value matches, at most 4 from any one category, so one noisy pattern cannot take the whole list. Context still decides the risk.${note}</p>`
+    : "";
+  const countNote = state.view !== "top" && shown && group.length > 25
+    ? `<p class="note">${group.length} matches in this step. Use Top hotspots for a short list, or narrow by category.${note}</p>`
+    : shown && note && state.view !== "top"
+      ? `<p class="note">${note.trim()}</p>`
       : "";
-  list.innerHTML = matches.length
-    ? hint + matches.map(hotspotHtml).join("")
-    : `<p class="note">No hotspots match these filters.${hidden}</p>`;
+  const results = !state.scan
+    ? `<p class="note">Choose a repository and scan when you want matches with file names and line numbers. Until then, this page has not read the filesystem.</p>`
+    : group.length
+      ? group.map(hotspotHtml).join("")
+      : `<p class="note">No hotspots match these filters.</p>`;
+  const tone = stepTone(step.id);
+  return `
+    <section class="step${tone ? ` tone-${tone}` : ""}" id="step-${esc(step.id)}" ${shown ? "" : "hidden"}>
+      <div class="step-bar">
+        <div class="step-title">
+          <span class="num">${step.order}</span>
+          <span><strong>${esc(step.title)}</strong> <span class="summary">${esc(step.summary)}</span></span>
+        </div>
+        ${marksHtml(step.id)}
+      </div>
+      <section class="strategy">
+        <button type="button" class="step-toggle" data-action="toggle-step" data-step="${esc(step.id)}" aria-expanded="${open ? "true" : "false"}">
+          <span><strong>Regex and strategy</strong> <span class="summary">${guide.searchCount === 1 ? "1 search" : `${guide.searchCount} searches`}</span></span>
+        </button>
+        <div class="step-body" ${open ? "" : "hidden"}>
+          <ol>${step.guidance.map((line) => `<li>${esc(line)}</li>`).join("")}</ol>
+          ${cards}
+        </div>
+      </section>
+      <div class="results">
+        <p class="side-label">Results</p>
+        ${topNote}
+        ${countNote}
+        ${results}
+      </div>
+    </section>
+  `;
 }
 
 function compareBySort(a, b) {
@@ -635,10 +646,45 @@ function compareBySort(a, b) {
   return byFile;
 }
 
-function triageStatus(item) {
+function triageRecord(item) {
   const repo = state.scan && state.scan.repoRoot;
   const bucket = repo && state.triage[repo];
-  return bucket && bucket[item.id] ? bucket[item.id] : "";
+  const raw = bucket && bucket[item.id];
+  const statuses = ["resolved", "ignored", "true-positive"];
+  const severities = ["Critical", "High", "Medium", "Low"];
+  if (statuses.includes(raw)) return { status: raw, needsReview: false, severity: "" };
+  if (raw && typeof raw === "object") {
+    return {
+      status: statuses.includes(raw.status) ? raw.status : "",
+      needsReview: raw.needsReview === true,
+      severity: severities.includes(raw.severity) ? raw.severity : "",
+    };
+  }
+  return { status: "", needsReview: false, severity: "" };
+}
+
+function shownPriority(item) {
+  return triageRecord(item).severity || item.priority;
+}
+
+function triageStatus(item) {
+  return triageRecord(item).status;
+}
+
+function writeTriage(repo, hotId, mark) {
+  if (!state.triage[repo]) state.triage[repo] = {};
+  const severities = ["Critical", "High", "Medium", "Low"];
+  const severity = severities.includes(mark.severity) ? mark.severity : "";
+  if (!mark.status && !mark.needsReview && !severity) delete state.triage[repo][hotId];
+  else if (mark.status && !mark.needsReview && !severity) state.triage[repo][hotId] = mark.status;
+  else {
+    const next = {};
+    if (mark.status) next.status = mark.status;
+    if (mark.needsReview) next.needsReview = true;
+    if (severity) next.severity = severity;
+    state.triage[repo][hotId] = next;
+  }
+  if (!Object.keys(state.triage[repo]).length) delete state.triage[repo];
 }
 
 function triageNote() {
@@ -661,7 +707,7 @@ function matchingHotspots() {
   return state.scan.hotspots.filter((item) => {
     if (!activeLanguage(item)) return false;
     if (state.category !== "All" && item.category !== state.category) return false;
-    if (state.priority !== "All" && item.priority !== state.priority) return false;
+    if (state.priority !== "All" && shownPriority(item) !== state.priority) return false;
     if (state.filename && !item.file.toLowerCase().includes(state.filename.trim().toLowerCase())) return false;
     if (state.linked && !item.sourceToSink) return false;
     if (state.sinks && state.sources) {
@@ -723,20 +769,32 @@ function hotspotHtml(item) {
         `<span class="row${row.hit ? " hit" : ""}"><span class="ln">${row.line}</span>${esc(row.text)}</span>`
     )
     .join("");
-  const status = triageStatus(item);
+  const record = triageRecord(item);
+  const status = record.status;
+  const priority = shownPriority(item);
+  const tone = status === "true-positive" ? "tone-open" : status === "resolved" || status === "ignored" ? "tone-quiet" : "";
+  const severityOptions = ["Critical", "High", "Medium", "Low"]
+    .map((level) => `<option${level === priority ? " selected" : ""}>${esc(level)}</option>`)
+    .join("");
   return `
-    <article class="hot${status ? ` is-${status}` : ""}">
+    <article class="hot ${tone}${status ? ` is-${status}` : ""}">
       <div class="triage-row">
+        <label class="triage"><input type="checkbox" data-action="triage" data-id="${esc(item.id)}" data-status="needs-review"${record.needsReview ? " checked" : ""}> Needs Review</label>
         <label class="triage"><input type="checkbox" data-action="triage" data-id="${esc(item.id)}" data-status="resolved"${status === "resolved" ? " checked" : ""}> Resolved</label>
         <label class="triage"><input type="checkbox" data-action="triage" data-id="${esc(item.id)}" data-status="ignored"${status === "ignored" ? " checked" : ""}> Ignored</label>
+        <label class="triage"><input type="checkbox" data-action="triage" data-id="${esc(item.id)}" data-status="true-positive"${status === "true-positive" ? " checked" : ""}> True Positive</label>
+        <label class="triage severity">Severity
+          <select data-action="severity" data-id="${esc(item.id)}" data-original="${esc(item.priority)}">${severityOptions}</select>
+        </label>
       </div>
       <div class="hot-main">
       <button type="button" class="hot-toggle" data-action="toggle-hot" aria-expanded="false">
         <span class="badge-row">
-          <span class="pri pri-${esc(item.priority.toLowerCase())}">${esc(item.priority)}</span>
+          <span class="pri pri-${esc(priority.toLowerCase())}">${esc(priority)}</span>
           <span>${esc(item.category)}</span>
           <span class="conf conf-${esc(item.confidence.toLowerCase())}">Confidence: ${esc(item.confidence)}</span>
           ${item.sourceToSink ? `<span class="flag">Source nearby</span>` : ""}
+          ${record.needsReview ? `<span class="flag">Needs review</span>` : ""}
         </span>
         <span class="loc">${esc(item.file)}:${item.line}</span>
         <span class="hot-match">${esc(item.match)}</span>
@@ -766,7 +824,7 @@ function hotspotHtml(item) {
 function languageName(id) {
   if (id === "node") return "Node.js";
   if (id === "java") return "Java";
-  if (id === "spring") return "Spring Boot";
+  if (id === "spring") return "Spring / Spring Boot";
   if (id === "config") return "Configuration";
   return id;
 }
@@ -806,7 +864,7 @@ async function onClick(event) {
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const action = button.dataset.action;
-  if (action === "triage") return;
+  if (action === "triage" || action === "severity") return;
   if (action === "mode") {
     state.mode = button.dataset.mode;
     renderMain();
@@ -863,11 +921,8 @@ async function onClick(event) {
   if (action === "jump") {
     const stepId = button.dataset.step;
     state.currentStep = stepId;
+    state.holdClosed = false;
     state.open[stepId] = true;
-    if (state.mode === "active" && state.view !== "checklist") {
-      state.view = "checklist";
-      scheduleSave();
-    }
     if (state.mode === "passive") renderGuide();
     else renderActiveList();
     renderLeft();
@@ -986,14 +1041,33 @@ function renderBrowser() {
 }
 
 function onChange(event) {
+  if (event.target.dataset.action === "severity") {
+    const repo = state.scan && state.scan.repoRoot;
+    const hotId = event.target.dataset.id;
+    if (!repo || !hotId) return;
+    const current = triageRecord({ id: hotId });
+    const chosen = event.target.value;
+    writeTriage(repo, hotId, {
+      status: current.status,
+      needsReview: current.needsReview,
+      severity: chosen === event.target.dataset.original ? "" : chosen,
+    });
+    scheduleSave();
+    renderActiveList();
+    return;
+  }
   if (event.target.dataset.action === "triage") {
     const repo = state.scan && state.scan.repoRoot;
     const hotId = event.target.dataset.id;
     if (!repo || !hotId) return;
-    if (!state.triage[repo]) state.triage[repo] = {};
-    if (event.target.checked) state.triage[repo][hotId] = event.target.dataset.status;
-    else delete state.triage[repo][hotId];
-    if (!Object.keys(state.triage[repo]).length) delete state.triage[repo];
+    const current = triageRecord({ id: hotId });
+    if (event.target.dataset.status === "needs-review") {
+      writeTriage(repo, hotId, { status: current.status, needsReview: event.target.checked, severity: current.severity });
+    } else if (event.target.checked) {
+      writeTriage(repo, hotId, { status: event.target.dataset.status, needsReview: current.needsReview, severity: current.severity });
+    } else {
+      writeTriage(repo, hotId, { status: "", needsReview: current.needsReview, severity: current.severity });
+    }
     scheduleSave();
     renderActiveList();
     return;

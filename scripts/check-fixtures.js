@@ -49,6 +49,22 @@ async function main() {
   if (!has((item) => item.match.includes("GetMapping") || item.match.includes("RestController"))) {
     fail("Expected a Spring mapping");
   }
+  if (!has((item) => item.title === "Classic Spring Security rules" && item.match.includes("antMatchers"))) {
+    fail("Expected a classic Spring Security match");
+  }
+  if (!has((item) => item.title === "Classic Spring MVC handlers" && item.match.includes("ModelAndView"))) {
+    fail("Expected a classic Spring MVC match");
+  }
+  if (!has((item) => item.title === "Classic form binding" && item.match.includes("ModelAttribute"))) {
+    fail("Expected classic form binding");
+  }
+  if (!has((item) => item.title === "Classic Spring ORM queries")) fail("Expected a classic Spring ORM match");
+  if (!has((item) => item.title === "Spring view redirects" && item.match.includes("RedirectView"))) {
+    fail("Expected a Spring redirect view");
+  }
+  if (!has((item) => item.title === "Spring expression evaluation" && item.match.includes("parseExpression"))) {
+    fail("Expected a Spring expression match");
+  }
   if (!has((item) => item.category === "Command Injection" && item.file.includes("java-sample"))) {
     fail("Expected a Java command execution match");
   }

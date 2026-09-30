@@ -30,7 +30,7 @@ Use `--port` to change the port. The server listens on `127.0.0.1` only.
 
 **Passive** is the default. It does not read a repository. Pick a language family and work the 16-step checklist. Each step has keywords and a regex you can paste into Visual Studio Code Find in Files or Notepad++ Find in Files, with regular expression mode turned on. The editor shows line numbers and jumps to the match. Each regex also has a `ripgrep` command.
 
-Spring Boot review includes the Java searches plus the Spring-specific ones.
+Spring / Spring Boot review includes the Java searches, Spring Boot patterns, and classic Spring Framework patterns such as antMatchers, form binding, and SpEL.
 
 **Active** reads a folder you choose and runs those same regular expressions. It lists file, line number, a short snippet, why the line deserves a look, and what to verify. It does not lint, compile, build an AST, modify files, or rewrite the repository.
 
@@ -38,7 +38,7 @@ Spring Boot review includes the Java searches plus the Spring-specific ones.
 
 - Node.js, JavaScript, and TypeScript
 - Java
-- Spring Boot, Spring MVC, and Spring Security
+- Spring Framework and Spring Boot, including Spring MVC and Spring Security
 
 ## Hotspot categories
 

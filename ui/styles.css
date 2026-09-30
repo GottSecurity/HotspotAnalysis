@@ -117,6 +117,13 @@ button { cursor: pointer; }
 
 .jump:hover, .jump.current { background: #1b3148; color: #fff; }
 
+.jump.tone-todo { background: #645488; color: #f6f1ff; }
+.jump.tone-todo:hover, .jump.tone-todo.current { background: #7a68a0; color: #fff; }
+.jump.tone-open { background: #5a3d4a; color: #ffe8ef; }
+.jump.tone-open:hover, .jump.tone-open.current { background: #6d4b5a; color: #fff5f8; }
+.jump.tone-quiet { color: #8e97a3; }
+.jump.tone-quiet:hover, .jump.tone-quiet.current { background: #1c222a; color: #c5ccd4; }
+
 .jump.mark-issue { box-shadow: inset 3px 0 0 var(--critical); }
 .jump.mark-reviewed { box-shadow: inset 3px 0 0 var(--low); }
 .jump.mark-reviewing { box-shadow: inset 3px 0 0 var(--gold); }
@@ -421,6 +428,24 @@ input[type="search"], input[type="text"] { text-transform: none; letter-spacing:
   box-shadow: var(--shadow);
 }
 
+.step.tone-todo {
+  background: #6d5d90;
+  border-color: #cbbbe6;
+  border-left-color: #e4d8f7;
+}
+
+.step.tone-open {
+  background: #5c4150;
+  border-color: #e7b4c3;
+  border-left-color: #f3c6d1;
+}
+
+.step.tone-quiet {
+  background: #161a20;
+  border-color: #4a525c;
+  border-left-color: #7d8692;
+}
+
 .step-bar, .hot-toggle {
   display: flex;
   gap: 10px;
@@ -430,6 +455,26 @@ input[type="search"], input[type="text"] { text-transform: none; letter-spacing:
 }
 
 .step-bar { padding: 8px; align-items: center; }
+
+.step-title {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex: 1;
+  min-width: 0;
+}
+
+.strategy {
+  margin: 8px 10px 0;
+  border: 1px solid #45617f;
+  border-left: 4px solid var(--teal);
+  border-radius: 10px;
+  background: #101820;
+}
+
+.results { padding: 8px 10px 12px; }
+
+.results .side-label { margin: 6px 0 8px; }
 
 .step-toggle, .hot-toggle {
   background: transparent;
@@ -558,8 +603,34 @@ input[type="search"], input[type="text"] { text-transform: none; letter-spacing:
   white-space: nowrap;
 }
 
-.hot.is-resolved { border-left-color: #86c49a; }
-.hot.is-ignored { border-left-color: #8c7d68; opacity: 0.72; }
+.triage.severity {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.triage select {
+  min-width: 0;
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.hot.tone-open {
+  background: #5c4150;
+  border-color: #e7b4c3;
+  border-left-color: #f3c6d1;
+}
+
+.hot.tone-quiet {
+  background: #161a20;
+  border-color: #4a525c;
+  border-left-color: #7d8692;
+  opacity: 1;
+}
 
 .hot-toggle {
   flex-direction: column;
