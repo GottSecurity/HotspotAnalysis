@@ -1,0 +1,10 @@
+{
+  "name": "security-hotspot-navigator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local read-only guide for security code review of Node.js, Java, and Spring Boot.",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node scripts/check-fixtures.js"
+  }
+}
