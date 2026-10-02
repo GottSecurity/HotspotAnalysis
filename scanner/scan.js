@@ -3,6 +3,7 @@
 const fs = require("fs");
 const path = require("path");
 const { allSearches } = require("../library/catalog");
+const { judgeDependency, pythonManifest } = require("../library/depFloors");
 const { correlate } = require("./sourceSink");
 
 const SKIP_DIRS = new Set([
@@ -43,12 +44,17 @@ const MAX_HOTSPOTS = 1500;
 const MAX_LINE_LENGTH = 2000;
 
 function isConfigName(base) {
+  const name = base.toLowerCase();
   return (
-    base === "package.json" ||
-    base === "pom.xml" ||
-    base.startsWith("build.gradle") ||
-    base.startsWith(".env") ||
-    /^application.*\.(yml|yaml|properties)$/.test(base)
+    name === "package.json" ||
+    name === "pom.xml" ||
+    name.startsWith("build.gradle") ||
+    name.startsWith(".env") ||
+    name === "pipfile" ||
+    name === "pyproject.toml" ||
+    /^requirements.*\.txt$/.test(name) ||
+    name === "web.xml" ||
+    /^application.*\.(yml|yaml|properties)$/.test(name)
   );
 }
 
@@ -174,6 +180,12 @@ async function scanRepo(repoInput) {
     filesScanned += 1;
 
     const applicable = searches.filter((item) => applies(family, item));
+    for (const item of applicable) {
+      if (!item.matchFile || hotspots.length >= MAX_HOTSPOTS) continue;
+      const base = path.basename(rel);
+      if (!item.compiled.test(base)) continue;
+      hotspots.push(hotspotFrom(rel, family, item, 1, base, lines));
+    }
     for (let index = 0; index < lines.length; index += 1) {
       if (hotspots.length >= MAX_HOTSPOTS) {
         truncated = true;
@@ -186,35 +198,17 @@ async function scanRepo(repoInput) {
           truncated = true;
           break;
         }
+        if (item.matchFile) continue;
+        if (item.floorKind === "python" && !pythonManifest(path.basename(rel))) continue;
         if (!item.compiled.test(line)) continue;
         const lineNumber = index + 1;
-        hotspots.push({
-          id: `${rel}:${lineNumber}:${item.id}`,
-          file: rel,
-          line: lineNumber,
-          language: family,
-          tags: item.languages,
-          category: item.category,
-          priority: item.priority,
-          rank: item.rank,
-          top: item.top,
-          role: item.role,
-          confidence: "Low",
-          title: item.title,
-          stepId: item.stepId,
-          stepOrder: item.stepOrder,
-          stepTitle: item.stepTitle,
-          match: line.trim().slice(0, 180),
-          sinkPattern: item.role === "sink" ? line.trim().slice(0, 180) : "",
-          sourcePattern: "",
-          sourceToSink: false,
-          snippet: snippetFor(lines, lineNumber),
-          why: item.why,
-          whatToCheck: item.whatToCheck,
-          falsePositives: item.falsePositives,
-          verify: item.verify,
-          secureAlternative: item.secureAlternative,
-        });
+        if (item.floorKind) {
+          const judged = judgeDependency(item.floorKind, line, lines, index);
+          if (!judged.keep) continue;
+          hotspots.push(hotspotFrom(rel, family, item, lineNumber, line.trim().slice(0, 180), lines, judged));
+          continue;
+        }
+        hotspots.push(hotspotFrom(rel, family, item, lineNumber, line.trim().slice(0, 180), lines));
       }
     }
   }
@@ -228,6 +222,40 @@ async function scanRepo(repoInput) {
     hotspotCount: hotspots.length,
     truncated,
     hotspots,
+  };
+}
+
+function hotspotFrom(rel, family, item, lineNumber, match, lines, judged) {
+  const extra = judged || {};
+  return {
+    id: `${rel}:${lineNumber}:${item.id}`,
+    file: rel,
+    line: lineNumber,
+    language: family,
+    tags: item.languages,
+    category: item.category,
+    priority: extra.priority || item.priority,
+    rank: item.rank,
+    top: item.top,
+    role: item.role,
+    confidence: "Low",
+    title: item.title,
+    stepId: item.stepId,
+    stepOrder: item.stepOrder,
+    stepTitle: item.stepTitle,
+    match,
+    reportedVersion: extra.reportedVersion || "",
+    knownGood: extra.knownGood || "",
+    versionNote: extra.versionNote || "",
+    sinkPattern: item.role === "sink" ? match : "",
+    sourcePattern: "",
+    sourceToSink: false,
+    snippet: snippetFor(lines, lineNumber),
+    why: extra.why || item.why,
+    whatToCheck: item.whatToCheck,
+    falsePositives: item.falsePositives,
+    verify: item.verify,
+    secureAlternative: item.secureAlternative,
   };
 }
 

@@ -24,13 +24,15 @@ node server.js --repo "C:\code\interview-repo"
 
 Open [http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Index.html](http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Index.html). The server root redirects there.
 
-The status sheet is [http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Status.html](http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Status.html). It lists the saved scan like a spreadsheet: finding name, file, line, synopsis, general and specific remediation, and a status.
+The status sheet is [http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Status.html](http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/Status.html). It lists the saved scan like a spreadsheet: finding name, file, line, synopsis, general and specific remediation, severity (C, H, M, or L), and a status. Click a column header to sort.
+
+User Status is [http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/StatusEntry.html](http://127.0.0.1:3000/GottSecurity/HotspotAnalysis/StatusEntry.html). It starts empty so you can type findings yourself, including the same severity choices. Column headers sort the rows. Rows are saved on this server for the repository path selected on the analysis page.
 
 Use `--port` to change the port. The server listens on `127.0.0.1` only.
 
 ## Modes
 
-**Passive** is the default. It does not read a repository. Pick a language family and work the 16-step checklist. Each step has keywords and a regex you can paste into Visual Studio Code Find in Files or Notepad++ Find in Files, with regular expression mode turned on. The editor shows line numbers and jumps to the match. Each regex also has a `ripgrep` command.
+**Passive** is the default. It does not read a repository. Pick a language family and work the 19-step checklist. Each step has keywords and a regex you can paste into Visual Studio Code Find in Files or Notepad++ Find in Files, with regular expression mode turned on. The editor shows line numbers and jumps to the match. Each regex also has a `ripgrep` command.
 
 Spring / Spring Boot review includes the Java searches, Spring Boot patterns, classic Spring Framework patterns, Spring Security rules, and Spring HTTP API patterns such as HttpExchange and Feign. Python review covers Flask, Django, and FastAPI.
 
@@ -46,7 +48,7 @@ Spring / Spring Boot review includes the Java searches, Spring Boot patterns, cl
 
 ## Hotspot categories
 
-External entry points, authentication, authorization / IDOR / BOLA, SQL injection, NoSQL injection, command injection, XSS, path traversal, file upload, SSRF, XXE, deserialization, secrets, cryptography, password handling, session / cookies, CORS, CSRF, open redirect, mass assignment, logging / sensitive data, and dependency / configuration.
+External entry points, authentication, authorization / IDOR / BOLA, SQL injection, NoSQL injection, command injection, XSS, path traversal, file upload, SSRF, XXE, deserialization, secrets, cryptography, password handling, session / cookies, CORS, CSRF, open redirect, mass assignment, logging / sensitive data, error disclosure, security headers, bill of materials, and dependency / configuration.
 
 ## Source and sink heuristic
 

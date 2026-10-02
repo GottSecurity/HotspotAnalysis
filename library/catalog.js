@@ -1,5 +1,7 @@
 "use strict";
 
+const { SNAPSHOT, NODE_FLOORS, JAVA_FLOORS, PYTHON_FLOORS, nodeRegex, javaRegex, pythonRegex, clientFloors } = require("./depFloors");
+
 /**
  * Review guide and scan patterns.
  * The regex strings are the same text a reviewer pastes into VS Code,
@@ -44,6 +46,8 @@ const CATEGORIES = [
   "Open Redirect",
   "Mass Assignment",
   "Logging / Sensitive Data",
+  "Error Disclosure",
+  "Security Headers",
   "Dependency / Configuration",
 ];
 
@@ -1448,6 +1452,7 @@ const STEPS = [
     guidance: [
       "Find request bodies copied into models, entities, or update calls.",
       "Check whether role, owner, status, or price fields can be supplied by the caller.",
+      "Deep merge and lodash merge of a request object can also set __proto__.",
       "Prefer an allow-list of fields, or a DTO that omits sensitive properties.",
     ],
     searches: [
@@ -1476,21 +1481,23 @@ const STEPS = [
         id: "spring-mass",
         languages: ["java", "spring"],
         category: "Mass Assignment",
-        title: "Request body binding",
-        role: "source",
+        title: "Spring Data or JPA save",
+        role: "sink",
         priority: "High",
         rank: 12,
         top: true,
-        keywords: ["@RequestBody", "@Entity", "save("],
-        regex: "@RequestBody\\b",
-        why: "A request body is bound to a Java object. If that type is a persistence entity, the caller may set fields the form never showed.",
+        keywords: ["save(", "saveAll(", "saveAndFlush(", "persist(", "merge(", "saveOrUpdate("],
+        regex:
+          "\\.(save|saveAll|saveAndFlush|persist|merge|saveOrUpdate)\\s*\\(",
+        why: "Spring Data save, saveAll, and saveAndFlush, and JPA persist and merge, write an object as stored. Mass assignment is when that object was bound from the request, so the caller can set fields the handler never named.",
         whatToCheck:
-          "1. Find @RequestBody. 2. Identify the parameter type. 3. See whether it is an entity or a DTO. 4. See whether sensitive properties exist on that type. 5. Inspect repository.save of that object.",
+          "Open the argument. If it is a @RequestBody or @ModelAttribute parameter, list the fields on that type, including role, owner, and admin.",
         falsePositives:
-          "Binding to a DTO that contains only the fields the operation should accept.",
-        verify: "Open the class. Entity annotations or sensitive setters make this a stronger review.",
+          "A save of an object built in code, such as new User(name, password). Map.merge. A test that only verifies the repository was called.",
+        verify:
+          "Stay on repository.save(newUser) when newUser is the @RequestBody parameter. A save with no request binding is ordinary persistence.",
         secureAlternative:
-          "Bind a DTO and copy the allowed fields onto the entity in code.",
+          "Bind a DTO and copy the allowed fields onto the entity before save.",
       }),
       search({
         id: "spring-form-binding",
@@ -1552,6 +1559,27 @@ const STEPS = [
         verify: "Merging parsed query or JSON objects into {} is the case to stay on.",
         secureAlternative:
           "Copy an allow-list of keys. Reject __proto__ and constructor before a merge.",
+      }),
+      search({
+        id: "node-merge",
+        languages: ["node"],
+        category: "Mass Assignment",
+        title: "Deep merge of a request object",
+        role: "sink",
+        priority: "High",
+        rank: 12,
+        top: true,
+        keywords: ["_.merge", "lodash.merge", "deepmerge", "merge(req.body)"],
+        regex:
+          "_\\.merge\\s*\\(|lodash\\.merge\\s*\\(|\\bdeepmerge\\s*\\(|\\bmerge\\s*\\(\\s*[^,\\n]*,\\s*req\\.(body|query|params)",
+        why: "A deep merge copies nested keys from the request onto an object. A caller can send __proto__ or constructor and change objects the handler never named. Object.assign of a request body is the other search on this step.",
+        whatToCheck:
+          "See whether the merged object is a user, a session, or a config value. Reject __proto__, constructor, and prototype before the merge.",
+        falsePositives:
+          "A merge of two objects built in code, with no request field in the call.",
+        verify: "Stay on merge when one argument is req.body, req.query, or a parsed request.",
+        secureAlternative:
+          "Copy an allow-list of keys. Skip __proto__, constructor, and prototype.",
       }),
     ],
   },
@@ -1733,6 +1761,7 @@ const STEPS = [
     guidance: [
       "Find CORS middleware and CSRF configuration.",
       "Review every wildcard origin, and any use of credentials together with a broad origin.",
+      "A dependency named csurf or cors, with no csurf( or cors( in the route files, is the missing control.",
       "Do not call a match vulnerable until you see which routes it applies to.",
     ],
     searches: [
@@ -1797,6 +1826,27 @@ const STEPS = [
         secureAlternative:
           "Keep CSRF protection on cookie-authenticated state changes. Exempt only signature-checked callbacks.",
       }),
+      search({
+        id: "csrf-manifest",
+        languages: ["node"],
+        category: "CSRF",
+        title: "CSRF or CORS package in the manifest",
+        role: "review",
+        priority: "Low",
+        rank: 15,
+        top: true,
+        onConfig: true,
+        keywords: ["csurf", "cors", "package.json"],
+        regex: "[\"'](csurf|cors)[\"']",
+        why: "The manifest names a CSRF or CORS package. That line does not show whether the package is mounted on the routes that change state.",
+        whatToCheck:
+          "Search the route files for csurf( or cors(. A package with no call is the missing control. Then see which routes use a session cookie.",
+        falsePositives:
+          "A package that is required and applied to the state-changing routes.",
+        verify: "Open server.js and the route file. The dependency line alone is not the middleware.",
+        secureAlternative:
+          "Mount the CSRF check on cookie-authenticated state changes. Restrict CORS to known origins.",
+      }),
     ],
   },
   {
@@ -1807,6 +1857,7 @@ const STEPS = [
     guidance: [
       "Find logs that include credentials, tokens, or personal data.",
       "Check request dumps that print headers or bodies.",
+      "Confirm failed logins and other security events are logged, and that those lines do not contain the password.",
       "Prefer omitting the value, or redacting it.",
     ],
     searches: [
@@ -1833,6 +1884,26 @@ const STEPS = [
         secureAlternative:
           "Log an event and an id. Do not log passwords, tokens, or full authorization headers.",
       }),
+      search({
+        id: "audit-log",
+        languages: ["node"],
+        category: "Logging / Sensitive Data",
+        title: "Request or application logger",
+        role: "review",
+        priority: "Low",
+        rank: 18,
+        top: true,
+        keywords: ["morgan(", "winston"],
+        regex: "\\bmorgan\\s*\\(|\\bwinston\\b",
+        why: "This is a logger the application names. A request logger such as morgan does not by itself record failed logins.",
+        whatToCheck:
+          "Confirm failed logins and other security events are written, and that the log line does not contain the password or the token.",
+        falsePositives:
+          "A logger that already records failed authentication without the credential value.",
+        verify: "Open the login failure path and see whether it writes a log line.",
+        secureAlternative:
+          "Log the failed login and the account name. Do not log the password.",
+      }),
     ],
   },
   {
@@ -1843,9 +1914,58 @@ const STEPS = [
     guidance: [
       "Open the manifest and the framework security configuration.",
       "Review authentication rules, debug settings, and exposed management endpoints.",
-      "This step is mostly manual. A regex only highlights a few obvious keys.",
+      "File names: package.json, pom.xml, build.gradle, build.gradle.kts, requirements.txt, Pipfile, pyproject.toml, web.xml, application.yml, application.yaml, application.properties, .env.",
     ],
     searches: [
+      search({
+        id: "manifest-names",
+        languages: ["node", "java", "spring", "python"],
+        category: "Dependency / Configuration",
+        title: "Manifest and security config files",
+        role: "review",
+        priority: "Low",
+        rank: 20,
+        top: true,
+        onConfig: true,
+        matchFile: true,
+        flags: "i",
+        files: [
+          "package.json",
+          "pom.xml",
+          "build.gradle",
+          "build.gradle.kts",
+          "requirements.txt",
+          "Pipfile",
+          "pyproject.toml",
+          "web.xml",
+          "application*.yml",
+          "application*.yaml",
+          "application*.properties",
+          ".env",
+          ".env.*",
+        ],
+        keywords: [
+          "package.json",
+          "pom.xml",
+          "build.gradle",
+          "requirements.txt",
+          "Pipfile",
+          "pyproject.toml",
+          "web.xml",
+          "application.yml",
+          ".env",
+        ],
+        regex:
+          "^(package\\.json|pom\\.xml|build\\.gradle(\\.kts)?|requirements\\.txt|Pipfile|pyproject\\.toml|web\\.xml|application.*\\.(yml|yaml|properties)|\\.env(\\..*)?)$",
+        why: "These file names are the dependency manifests and the framework security settings. The pattern matches the name, not a line inside the file.",
+        whatToCheck:
+          "In VS Code or Notepad++ Find in Files, paste the names into files to include. Then read dependencies, debug flags, and authentication settings in each file.",
+        falsePositives:
+          "An example or test manifest that production does not load. A .env.example that holds placeholders.",
+        verify: "The regex does not know which dependency version is vulnerable. Open the file.",
+        secureAlternative:
+          "Pin dependencies and keep secrets and debug settings out of the production manifest.",
+      }),
       search({
         id: "config-flags",
         languages: ["java", "spring"],
@@ -1895,6 +2015,211 @@ const STEPS = [
         secureAlternative:
           "Read DEBUG from the environment and keep it off in production.",
       }),
+      search({
+        id: "review-packages",
+        languages: ["node"],
+        category: "Dependency / Configuration",
+        title: "Packages that need a version review",
+        role: "review",
+        priority: "Medium",
+        rank: 19,
+        top: true,
+        onConfig: true,
+        keywords: ["node-serialize", "mathjs", "package.json"],
+        regex: "[\"'](node-serialize|mathjs)[\"']",
+        why: "These package names come up in reviews because older releases have been used to run code. The pattern does not know the installed version.",
+        whatToCheck:
+          "Open the manifest and read the version. Then find the call, such as unserialize or mathjs.eval, and see whether the argument comes from the request.",
+        falsePositives:
+          "A current release used as a calculator with a restricted set of operations, or a test manifest production does not load.",
+        verify: "The regex is not a vulnerability database. Read the version and the call.",
+        secureAlternative:
+          "Pin a current release. Do not pass a request string to a serializer or an expression evaluator.",
+      }),
+    ],
+  },
+  {
+    id: "errors",
+    order: 17,
+    title: "Error disclosure",
+    summary: "Find errors and stack traces sent back to the caller.",
+    guidance: [
+      "Find places that send an exception, a stack, or a development setting to the caller.",
+      "A calculator or parser that throws on bad input is the path to open.",
+      "If this step is empty, open the server file and confirm production does not run with development error pages.",
+    ],
+    searches: [
+      search({
+        id: "error-disclosure",
+        languages: ["node", "python"],
+        category: "Error Disclosure",
+        title: "Exception or development mode sent outward",
+        role: "review",
+        priority: "Medium",
+        rank: 17,
+        top: true,
+        keywords: ["err.stack", "res.send(err)", "res.json(err)", "NODE_ENV", "development", "traceback"],
+        regex:
+          "\\berr\\.stack\\b|\\bres\\.(send|json)\\s*\\(\\s*err\\b|\\breq\\.flash\\s*\\([^\\n]{0,80},\\s*err\\b|NODE_ENV\\s*(?:\\|\\||==)\\s*[\"']development[\"']|\\btraceback\\.format_exc\\s*\\(",
+        why: "The caller can receive a stack, an exception object, or a process that defaults to development. That shows internal paths and can change how errors are rendered.",
+        whatToCheck:
+          "See whether the value is rendered into the page or the response. Then see whether NODE_ENV is production when this process is deployed.",
+        falsePositives:
+          "A log of err.stack that is not written to the response. A development default that production overrides in the environment.",
+        verify: "Stay on a flash, render, or response that receives the error object itself.",
+        secureAlternative:
+          "Send a fixed message to the caller. Log the stack on the server. Run production with NODE_ENV set to production.",
+      }),
+      search({
+        id: "spring-error-disclosure",
+        languages: ["java", "spring"],
+        category: "Error Disclosure",
+        title: "Spring error details in configuration",
+        role: "review",
+        priority: "Medium",
+        rank: 17,
+        top: true,
+        onConfig: true,
+        flags: "i",
+        keywords: ["include-stacktrace", "include-message", "server.error"],
+        regex: "include-stacktrace|include-message",
+        why: "These settings control whether a Spring Boot error response includes the stack or the exception message.",
+        whatToCheck:
+          "See whether the value is always, and whether that file is the one production loads.",
+        falsePositives:
+          "A local profile that sets the value to never.",
+        verify: "always on the stacktrace setting is the line to read.",
+        secureAlternative:
+          "Set include-stacktrace and include-message to never in the production profile.",
+      }),
+    ],
+  },
+  {
+    id: "headers",
+    order: 18,
+    title: "Security headers",
+    summary: "Find browser security headers and the places they are turned off.",
+    guidance: [
+      "Find helmet, Content-Security-Policy, X-Frame-Options, and X-Powered-By.",
+      "A package name is not proof the header is set. Open the server file and see whether the middleware is mounted.",
+      "If the server creates an Express app and this step has no matches, open that file. Express sends X-Powered-By unless it is disabled.",
+    ],
+    searches: [
+      search({
+        id: "security-headers",
+        languages: ["node", "java", "spring", "python"],
+        category: "Security Headers",
+        title: "Browser security headers",
+        role: "review",
+        priority: "Low",
+        rank: 18,
+        top: true,
+        onConfig: true,
+        keywords: [
+          "helmet(",
+          "x-powered-by",
+          "Content-Security-Policy",
+          "X-Frame-Options",
+          "x-xss-protection",
+        ],
+        regex:
+          "\\bhelmet\\s*\\(|\\.disable\\s*\\(\\s*[\"']x-powered-by[\"']\\s*\\)|Content-Security-Policy|X-Frame-Options|x-xss-protection|\\bcontentSecurityPolicy\\b|\\bframeOptions\\s*\\(|\\bXFrameOptionsMiddleware\\b",
+        why: "These lines are where browser security headers are set, or where the Express X-Powered-By header is turned off. A dependency name alone does not mount the middleware.",
+        whatToCheck:
+          "If the only match is a package name, open the server file and see whether the middleware is used. If there is no match, open that file and look for the default X-Powered-By header.",
+        falsePositives:
+          "helmet() or a Content-Security-Policy that is already applied to the responses you care about.",
+        verify: "Read the server startup. The absence of a disable call leaves X-Powered-By on.",
+        secureAlternative:
+          "Set Content-Security-Policy and frame options, and disable X-Powered-By.",
+      }),
+    ],
+  },
+  {
+    id: "dep-versions",
+    order: 19,
+    title: "Bill of Materials",
+    summary: "Compare dependency manifests with a snapshot of current releases.",
+    guidance: [
+      `Passive mode lists the registry release from ${SNAPSHOT}. Paste the regex for the language you are reviewing, then compare each version yourself.`,
+      "Node.js and JavaScript use package.json. Java and Spring use pom.xml or Gradle. Python uses requirements.txt, Pipfile, and pyproject.toml.",
+      "Active mode reports a line when the declared version is below that release, or when the note says to review any version.",
+      "A lower number is a review note. It is not proof of a vulnerability. A Maven dependency with no version of its own is left for the parent BOM.",
+    ],
+    searches: [
+      search({
+        id: "node-dep-floor",
+        languages: ["node", "javascript"],
+        category: "Dependency / Configuration",
+        title: "Node and JavaScript bill of materials",
+        role: "review",
+        priority: "Medium",
+        rank: 19,
+        top: true,
+        onConfig: true,
+        floorKind: "node",
+        floorDate: SNAPSHOT,
+        floors: clientFloors(NODE_FLOORS),
+        keywords: ["package.json", "dependencies"],
+        regex: nodeRegex(),
+        why: `These are 40 packages and the registry release recorded on ${SNAPSHOT}. The regex finds the name in package.json. It does not compare versions. Active mode does that comparison.`,
+        whatToCheck:
+          "Read the version on the same line and compare it to the table. A caret or tilde range is judged by its lowest version.",
+        falsePositives:
+          "A range whose lowest version is already the release in the table. A package you pinned on purpose while a major upgrade is still in progress.",
+        verify: "Open package.json. The table is a snapshot, not an advisory database.",
+        secureAlternative:
+          "Raise the declared range to a current release, or record why this repo stays on the older one.",
+      }),
+      search({
+        id: "java-dep-floor",
+        languages: ["java", "spring"],
+        category: "Dependency / Configuration",
+        title: "Java and Spring bill of materials",
+        role: "review",
+        priority: "Medium",
+        rank: 19,
+        top: true,
+        onConfig: true,
+        floorKind: "java",
+        floorDate: SNAPSHOT,
+        floors: clientFloors(JAVA_FLOORS),
+        keywords: ["pom.xml", "build.gradle", "artifactId"],
+        regex: javaRegex(),
+        why: `These are common Java artifacts and the Maven Central release recorded on ${SNAPSHOT}. The regex finds the artifact. Active mode compares a version on the same Gradle line, or the version tag under a Maven artifact.`,
+        whatToCheck:
+          "Compare the version to the table. If the dependency has no version tag, the parent or a BOM is supplying it. Open that parent.",
+        falsePositives:
+          "A current release, or a dependency whose version is inherited and was not on the following lines.",
+        verify: "Open pom.xml or the Gradle file. The table is a snapshot, not an advisory database.",
+        secureAlternative:
+          "Import a current BOM, or set the artifact version to a current release.",
+      }),
+      search({
+        id: "python-dep-floor",
+        languages: ["python"],
+        category: "Dependency / Configuration",
+        title: "Python bill of materials",
+        role: "review",
+        priority: "Medium",
+        rank: 19,
+        top: true,
+        onConfig: true,
+        flags: "i",
+        floorKind: "python",
+        floorDate: SNAPSHOT,
+        floors: clientFloors(PYTHON_FLOORS),
+        keywords: ["requirements.txt", "Pipfile", "pyproject.toml"],
+        regex: pythonRegex(),
+        why: `These are common Python packages and the PyPI release recorded on ${SNAPSHOT}. The regex finds the name in requirements.txt, Pipfile, and pyproject.toml. Active mode compares the version.`,
+        whatToCheck:
+          "In Find in Files, limit the search to requirements*.txt, Pipfile, and pyproject.toml. Compare the version to the table. Names are matched without regard to case.",
+        falsePositives:
+          "A range whose lowest version is already the release in the table. A comment that repeats a pinned requirement.",
+        verify: "Open the manifest. The table is a snapshot, not an advisory database.",
+        secureAlternative:
+          "Raise the pin to a current release, or record why this repo stays on the older one.",
+      }),
     ],
   },
 ];
@@ -1930,8 +2255,8 @@ function assertCatalog() {
       throw new Error(`Bad regex ${item.id}: ${err.message}`);
     }
   }
-  if (STEPS.length !== 16) {
-    throw new Error(`Expected 16 review steps, found ${STEPS.length}`);
+  if (STEPS.length !== 19) {
+    throw new Error(`Expected 19 review steps, found ${STEPS.length}`);
   }
 }
 
@@ -1959,6 +2284,10 @@ function toClientCatalog() {
         keywords: item.keywords,
         regex: item.regex,
         flags: item.flags,
+        files: item.files || [],
+        matchFile: item.matchFile === true,
+        floorDate: item.floorDate || "",
+        floors: item.floors || [],
         why: item.why,
         whatToCheck: item.whatToCheck,
         falsePositives: item.falsePositives,

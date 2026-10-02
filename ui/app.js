@@ -1,6 +1,5 @@
 "use strict";
 
-const MARK_KEY = "security-hotspot-navigator-marks";
 const CONFIDENCE_NOTE = {
   High: "A request source and this sink are within 40 lines in the same file. Confirm the value actually reaches the sink.",
   Medium: "A request source exists elsewhere in this file. It may not reach this sink.",
@@ -38,7 +37,11 @@ const state = {
   linked: false,
   hideResolved: true,
   hideIgnored: true,
+  hideDuplicates: false,
   triage: {},
+  marksByRepo: {},
+  githubByRepo: {},
+  github: "",
   sort: "priority",
   view: "findings",
   scan: null,
@@ -47,9 +50,11 @@ const state = {
   history: [],
   open: {},
   strategyOpen: {},
-  marks: loadMarks(),
+  marks: {},
   leftOpen: true,
   rightOpen: true,
+  activeProject: "",
+  sentToUser: new Set(),
   currentStep: "",
   holdClosed: false,
   browseOpen: false,
@@ -79,24 +84,119 @@ async function load() {
     state.catalog = await libraryResponse.json();
     applySession(await sessionResponse.json());
     await refreshHistory();
-    if (state.repo) await restoreScan(state.repo);
+    if (state.repo) {
+      const restored = await restoreScan(state.repo);
+      if (!restored) switchProject(state.repo);
+    }
     renderShell();
   } catch (err) {
     app.textContent = "The review guide could not be loaded. Start it with node server.js and open http://127.0.0.1:3000.";
   }
 }
 
-function loadMarks() {
-  try {
-    const parsed = JSON.parse(localStorage.getItem(MARK_KEY) || "{}");
-    return parsed && typeof parsed === "object" ? parsed : {};
-  } catch (err) {
-    return {};
-  }
+function canonicalProject(path) {
+  return String(path || "").trim().replace(/\//g, "\\").replace(/[\\/]+$/, "");
 }
 
-function saveMarks() {
-  localStorage.setItem(MARK_KEY, JSON.stringify(state.marks));
+function sameProject(a, b) {
+  return canonicalProject(a).toLowerCase() === canonicalProject(b).toLowerCase();
+}
+
+function projectKey() {
+  return state.activeProject || canonicalProject(state.repo);
+}
+
+function findMarksKey(path) {
+  const want = canonicalProject(path);
+  if (!want) return "";
+  return Object.keys(state.marksByRepo).find((key) => sameProject(key, want)) || "";
+}
+
+function applyProjectMarks() {
+  const stored = findMarksKey(projectKey());
+  const bucket = stored && state.marksByRepo[stored];
+  state.marks = bucket && typeof bucket === "object" ? { ...bucket } : {};
+}
+
+function findGithubKey(path) {
+  const want = canonicalProject(path);
+  if (!want) return "";
+  return Object.keys(state.githubByRepo).find((key) => sameProject(key, want)) || "";
+}
+
+function applyProjectGithub() {
+  const stored = findGithubKey(projectKey());
+  state.github = stored ? state.githubByRepo[stored] : "";
+}
+
+function storeProjectGithub() {
+  const key = projectKey();
+  if (!key) return;
+  const previous = findGithubKey(key);
+  if (previous && previous !== key) delete state.githubByRepo[previous];
+  const url = String(state.github || "").trim();
+  if (!url) delete state.githubByRepo[key];
+  else state.githubByRepo[key] = url;
+}
+
+function parseGithub(input) {
+  let url;
+  try {
+    url = new URL(String(input || "").trim());
+  } catch (err) {
+    return null;
+  }
+  if (url.protocol !== "https:" || url.hostname.toLowerCase() !== "github.com") return null;
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (parts.length < 2) return null;
+  const owner = parts[0];
+  const repo = parts[1].replace(/\.git$/i, "");
+  if (!owner || !repo) return null;
+  const branch = parts[2] === "tree" && parts.length > 3 ? parts.slice(3).join("/") : "main";
+  return { owner, repo, branch };
+}
+
+function githubFileUrl(file, line) {
+  const parsed = parseGithub(state.github);
+  const number = Number(line);
+  if (!parsed || !file || !Number.isInteger(number) || number < 1) return "";
+  const filePath = String(file)
+    .replace(/\\/g, "/")
+    .split("/")
+    .filter(Boolean)
+    .map(encodeURIComponent)
+    .join("/");
+  const branch = parsed.branch.split("/").map(encodeURIComponent).join("/");
+  return `https://github.com/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}/blob/${branch}/${filePath}#L${number}`;
+}
+
+function storeProjectMarks() {
+  const key = projectKey();
+  if (!key) return;
+  const previous = findMarksKey(key);
+  if (previous && previous !== key) delete state.marksByRepo[previous];
+  if (!Object.keys(state.marks).length) delete state.marksByRepo[key];
+  else state.marksByRepo[key] = { ...state.marks };
+}
+
+function switchProject(nextPath) {
+  const next = canonicalProject(nextPath);
+  if (!next) return;
+  const stored = findMarksKey(next);
+  const resolved = state.scan && sameProject(state.scan.repoRoot, next) ? state.scan.repoRoot : stored || next;
+  if (state.activeProject && sameProject(state.activeProject, resolved)) {
+    state.repo = resolved;
+    return;
+  }
+  if (state.activeProject) {
+    storeProjectMarks();
+    storeProjectGithub();
+  }
+  state.activeProject = resolved;
+  state.repo = resolved;
+  if (state.scan && !sameProject(state.scan.repoRoot, resolved)) state.scan = null;
+  applyProjectMarks();
+  applyProjectGithub();
 }
 
 function applySession(saved) {
@@ -115,7 +215,10 @@ function applySession(saved) {
   state.linked = saved.linked === true;
   state.hideResolved = saved.hideResolved !== false;
   state.hideIgnored = saved.hideIgnored !== false;
+  state.hideDuplicates = saved.hideDuplicates === true;
   state.triage = saved.triage && typeof saved.triage === "object" && !Array.isArray(saved.triage) ? saved.triage : {};
+  state.marksByRepo = saved.marks && typeof saved.marks === "object" && !Array.isArray(saved.marks) ? saved.marks : {};
+  state.githubByRepo = saved.github && typeof saved.github === "object" && !Array.isArray(saved.github) ? saved.github : {};
   if (SORTS.some(([value]) => value === saved.sort)) state.sort = saved.sort;
   if (saved.view === "findings" || saved.view === "checklist" || saved.view === "top") state.view = saved.view;
 }
@@ -148,7 +251,10 @@ async function saveSession() {
         linked: state.linked,
         hideResolved: state.hideResolved,
         hideIgnored: state.hideIgnored,
+        hideDuplicates: state.hideDuplicates,
         triage: state.triage,
+        marks: state.marksByRepo,
+        github: state.githubByRepo,
         sort: state.sort,
         view: state.view,
       }),
@@ -203,12 +309,13 @@ function renderMain() {
   const note = state.mode === "passive"
     ? "Passive mode does not read your repository. Copy a regex, then use Find in Files. The editor shows the line number and can jump to it."
     : "";
-  document.title = "Security Hotspot Analysis";
+  document.title = "Hotspot Analysis";
   document.getElementById("main").innerHTML = `
     ${brandHtml()}
     ${note ? `<p class="note">${esc(note)}</p>` : ""}
     <div class="center-tools">
       <a class="ghost" href="/GottSecurity/HotspotAnalysis/Status.html">Status</a>
+      <a class="ghost" href="/GottSecurity/HotspotAnalysis/StatusEntry.html">User Status</a>
       <button type="button" class="ghost" data-action="collapse-all">Collapse all</button>
     </div>
     <div id="list"></div>
@@ -261,9 +368,14 @@ function brandHtml() {
   return `
     <header class="brand">
       <p class="byline">Gott Security</p>
+      <p class="tagline">Protecting You Most of the Time</p>
       <h1>Security Hotspot Analysis</h1>
       <p class="lede">A local review guide for Node.js, JavaScript, Java, Spring, and Python. Work the checklist in order, and paste each regex into your editor.</p>
       <p class="disclaimer">${esc(state.catalog.disclaimer)}</p>
+      <p class="page-urls">
+        <a href="/GottSecurity/HotspotAnalysis/Status.html">/GottSecurity/HotspotAnalysis/Status.html</a>
+        <a href="/GottSecurity/HotspotAnalysis/StatusEntry.html">/GottSecurity/HotspotAnalysis/StatusEntry.html</a>
+      </p>
     </header>
   `;
 }
@@ -329,6 +441,9 @@ function activeControls() {
         <button type="button" class="ghost" data-action="browse-open">Browse</button>
         <button type="button" class="primary" id="scan-button" data-action="scan">Scan</button>
       </div>
+      <label class="field">GitHub link
+        <input id="github-link" type="url" spellcheck="false" value="${esc(state.github)}" placeholder="https://github.com/owner/repo" title="Filename links open this repository. Add /tree/branch to pin a branch. Otherwise the link uses main.">
+      </label>
       ${historyField()}
       <p class="meta" id="scan-meta">Active mode reads files and runs the same regexes. It does not lint, modify, or rewrite anything.</p>
       <p class="error" id="scan-error"></p>
@@ -363,6 +478,7 @@ function activeControls() {
         <label><input id="only-linked" type="checkbox"${state.linked ? " checked" : ""}> Show sinks with nearby input (flow unverified)</label>
         <label><input id="hide-resolved" type="checkbox"${state.hideResolved ? " checked" : ""}> Hide resolved</label>
         <label><input id="hide-ignored" type="checkbox"${state.hideIgnored ? " checked" : ""}> Hide ignored</label>
+        <label><input id="hide-duplicates" type="checkbox"${state.hideDuplicates ? " checked" : ""}> Hide duplicates</label>
       </div>
       <div class="view-row">
         <button type="button" class="tab" data-action="view" data-view="findings" aria-pressed="${state.view === "findings" ? "true" : "false"}">Findings</button>
@@ -427,7 +543,7 @@ function progressHtml() {
   return `
     <div class="progress">
       <div>
-        <strong id="progress-label">0 / 16 categories reviewed</strong>
+        <strong id="progress-label">0 / 19 categories reviewed</strong>
         <div class="track" aria-hidden="true"><span id="progress-bar"></span></div>
       </div>
       <button type="button" class="ghost" data-action="reset-marks">Reset marks</button>
@@ -461,6 +577,7 @@ function renderGuide() {
   const list = document.getElementById("list");
   if (!list) return;
   list.innerHTML = state.catalog.steps.map((step) => stepHtml(guideStep(step))).join("");
+  updateProgress();
 }
 
 function guideStep(step) {
@@ -528,6 +645,7 @@ function stepHtml(step) {
       </div>
       <div class="step-body" id="body-${esc(step.id)}" ${open ? "" : "hidden"}>
         <ol>${step.guidance.map((line) => `<li>${esc(line)}</li>`).join("")}</ol>
+        ${state.searchType === "checklist" ? floorsBlock(step) : ""}
         ${searches}
       </div>
     </section>
@@ -554,6 +672,27 @@ function marksHtml(stepId) {
   `;
 }
 
+function floorsHtml(item) {
+  if (!item.floors || !item.floors.length) return "";
+  const rows = item.floors
+    .map(
+      (row) =>
+        `<tr><td>${esc(row.name)}</td><td>${esc(row.floor)}</td><td>${esc(row.note || (row.always ? "Review any version." : ""))}</td></tr>`
+    )
+    .join("");
+  return `
+    <div class="kicker">Registry release ${esc(item.floorDate || "")}. Passive mode: compare by hand.</div>
+    <table class="floors">
+      <thead><tr><th>Package</th><th>Last Known Good</th><th>Note</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
+function floorsBlock(step) {
+  return step.searches.map(floorsHtml).join("");
+}
+
 function searchHtml(item) {
   const showKeywords = state.mode === "active" || state.searchType === "all" || state.searchType === "keywords";
   const showRegex = state.mode === "active" || state.searchType === "all" || state.searchType === "regex";
@@ -562,6 +701,7 @@ function searchHtml(item) {
     <article class="search-card">
       <h3>${esc(item.title)}</h3>
       <p>${esc(item.why)}</p>
+      ${floorsHtml(item)}
       ${
         showKeywords
           ? `<div class="kicker">Keywords</div>
@@ -571,7 +711,7 @@ function searchHtml(item) {
       }
       ${
         showRegex
-          ? `<div class="kicker">Regex ${esc(caseNote)}</div>
+          ? `<div class="kicker">${item.matchFile ? "Filename regex" : "Regex"} ${esc(caseNote)}</div>
              <div class="pattern"><code id="re-${esc(item.id)}">${esc(item.regex)}</code>
              <button type="button" class="copy" data-action="copy-target" data-target="re-${esc(item.id)}">Copy search</button></div>
              <div class="kicker">ripgrep</div>
@@ -590,6 +730,10 @@ function searchHtml(item) {
 }
 
 function rgCommand(item) {
+  if (Array.isArray(item.files) && item.files.length) {
+    const globs = item.files.map((name) => `--glob '${String(name).replace(/'/g, "''")}'`).join(" ");
+    return `rg --files --hidden --glob '!.git/**' --glob '!node_modules/**' ${globs}`;
+  }
   const insensitive = item.flags && item.flags.includes("i") ? "-i " : "";
   const quoted = item.regex.replace(/'/g, "''");
   return `rg -n ${insensitive}--regexp '${quoted}' .`;
@@ -611,6 +755,7 @@ function renderActiveList() {
         ${!state.scan ? '<p>Choose a repository and scan to see hotspots.</p>' : selectTop(matches).map(hotspotHtml).join("") || '<p>No hotspots match these filters.</p>'}</div></section>`
     : state.catalog.steps.map((step) => activeStepHtml(step, matches, note)).join("");
   renderLeft();
+  updateProgress();
 }
 
 function activeStepHtml(step, matches, note) {
@@ -681,6 +826,36 @@ function compareBySort(a, b) {
   return byFile;
 }
 
+const WORKFLOW = [
+  ["needs-review", "Needs Review"],
+  ["true-positive", "True Positive"],
+  ["confirmed", "Confirmed"],
+  ["in-remediation", "In Remediation"],
+  ["mitigated", "Mitigated"],
+  ["remediated", "Remediated"],
+  ["resolved", "Resolved"],
+  ["ignored", "Ignored"],
+];
+
+function workflowValue(record) {
+  if (record.status === "ignored") return "ignored";
+  if (record.status === "resolved") return record.track === "remediated" ? "remediated" : "resolved";
+  if (record.track) return record.track;
+  if (record.status === "true-positive") return "true-positive";
+  return "needs-review";
+}
+
+function fieldsForWorkflow(value) {
+  if (value === "true-positive") return { status: "true-positive", track: "" };
+  if (value === "confirmed") return { status: "true-positive", track: "confirmed" };
+  if (value === "in-remediation") return { status: "true-positive", track: "in-remediation" };
+  if (value === "mitigated") return { status: "true-positive", track: "mitigated" };
+  if (value === "remediated") return { status: "resolved", track: "remediated" };
+  if (value === "resolved") return { status: "resolved", track: "" };
+  if (value === "ignored") return { status: "ignored", track: "" };
+  return { status: "", track: "" };
+}
+
 function triageRecord(item) {
   const repo = state.scan && state.scan.repoRoot;
   const bucket = repo && state.triage[repo];
@@ -714,7 +889,9 @@ function writeTriage(repo, hotId, mark) {
   const tracks = ["confirmed", "in-remediation", "mitigated", "remediated"];
   const severity = severities.includes(mark.severity) ? mark.severity : "";
   const prior = triageRecord({ id: hotId }).track;
-  const track = tracks.includes(mark.track) ? mark.track : mark.track === "" ? "" : prior;
+  const track = Object.prototype.hasOwnProperty.call(mark, "track")
+    ? tracks.includes(mark.track) ? mark.track : ""
+    : prior;
   if (!mark.status && !mark.needsReview && !severity && !track) delete state.triage[repo][hotId];
   else if (mark.status && !mark.needsReview && !severity && !track) state.triage[repo][hotId] = mark.status;
   else {
@@ -765,8 +942,12 @@ function matchingHotspots() {
   });
 }
 
+function lineKey(item) {
+  return `${item.file}:${item.line}`;
+}
+
 function filteredHotspots() {
-  return matchingHotspots()
+  const shown = matchingHotspots()
     .filter((item) => {
       const status = triageStatus(item);
       if (state.hideResolved && status === "resolved") return false;
@@ -774,6 +955,17 @@ function filteredHotspots() {
       return true;
     })
     .sort(compareBySort);
+  const counts = new Map();
+  for (const item of shown) counts.set(lineKey(item), (counts.get(lineKey(item)) || 0) + 1);
+  state.lineCounts = counts;
+  if (!state.hideDuplicates) return shown;
+  const seen = new Set();
+  return shown.filter((item) => {
+    const key = lineKey(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function activeLanguage(item) {
@@ -807,6 +999,14 @@ function selectTop(list) {
   return picked;
 }
 
+function versionSummary(item) {
+  if (item.reportedVersion && item.knownGood) {
+    const note = item.versionNote ? ` ${item.versionNote}` : "";
+    return `Reported Version: ${item.reportedVersion}, Last Known Good: ${item.knownGood}.${note}`;
+  }
+  return item.why || "";
+}
+
 function hotspotHtml(item) {
   const rows = item.snippet
     .map(
@@ -821,6 +1021,7 @@ function hotspotHtml(item) {
   const severityOptions = ["Critical", "High", "Medium", "Low"]
     .map((level) => `<option${level === priority ? " selected" : ""}>${esc(level)}</option>`)
     .join("");
+  const shared = (state.lineCounts && state.lineCounts.get(lineKey(item))) || 1;
   return `
     <article class="hot ${tone}${status ? ` is-${status}` : ""}">
       <div class="triage-row">
@@ -831,8 +1032,13 @@ function hotspotHtml(item) {
         <label class="triage severity">Severity
           <select data-action="severity" data-id="${esc(item.id)}" data-original="${esc(item.priority)}">${severityOptions}</select>
         </label>
+        <label class="triage severity">Status
+          <select data-action="workflow" data-id="${esc(item.id)}" title="True Positive accepts the finding. Confirmed, In Remediation, and Mitigated keep that acceptance. Remediated closes it as resolved. Ignored clears the stage.">${WORKFLOW.map(([value, label]) => `<option value="${value}"${workflowValue(record) === value ? " selected" : ""}>${label}</option>`).join("")}</select>
+        </label>
+        <button type="button" class="to-user" data-action="to-user" data-id="${esc(item.id)}"${state.sentToUser.has(item.id) ? " disabled" : ""}>${state.sentToUser.has(item.id) ? "In User Status" : "To User Status"}</button>
       </div>
       <div class="hot-main">
+      ${shared > 1 ? `<span class="multiple" title="This line has ${shared} findings">(Multiple)</span>` : ""}
       <button type="button" class="hot-toggle" data-action="toggle-hot" aria-expanded="false">
         <span class="badge-row">
           <span class="pri pri-${esc(priority.toLowerCase())}">${esc(priority)}</span>
@@ -842,10 +1048,10 @@ function hotspotHtml(item) {
           ${record.needsReview ? `<span class="flag">Needs review</span>` : ""}
         </span>
       </button>
-      <button type="button" class="loc" data-action="open-file" data-file="${esc(item.file)}" data-line="${item.line}" title="Open this line in Notepad++">${esc(item.file)}:${item.line}</button>
+      ${locationControl(item)}
       <button type="button" class="hot-more" data-action="toggle-hot" aria-expanded="false">
         <span class="hot-match">${esc(item.match)}</span>
-        <span class="hot-why">${esc(item.why)}</span>
+        <span class="hot-why">${esc(versionSummary(item))}</span>
       </button>
       <div class="hot-body" hidden>
         <p><strong>${esc(languageName(item.language))}</strong> · ${esc(item.title)} · ${esc(item.role)}</p>
@@ -853,7 +1059,7 @@ function hotspotHtml(item) {
         ${item.sinkPattern ? `<p>Sink pattern: ${esc(item.sinkPattern)}</p>` : ""}
         <div class="snippet">${rows}</div>
         <div class="kicker">Why this is sensitive</div>
-        <p>${esc(item.why)}</p>
+        <p>${esc(versionSummary(item))}</p>
         <div class="kicker">Confidence</div>
         <p>${esc(item.sourceToSink ? "A source pattern is within 40 lines. This is proximity only; no value flow or shared execution path has been established." : CONFIDENCE_NOTE[item.confidence] || "")}</p>
         <div class="kicker">What to verify</div>
@@ -910,6 +1116,85 @@ function paintScanChrome() {
   }
 }
 
+function joinRemediation(general, specific) {
+  const left = String(general || "").trim();
+  const right = String(specific || "").trim();
+  if (!right || right === left) return left;
+  if (!left) return right;
+  return `${left}\n\n${right}`;
+}
+
+function locationControl(item) {
+  const href = githubFileUrl(item.file, item.line);
+  const label = `${item.file}:${item.line}`;
+  if (href) {
+    return `<a class="loc" href="${esc(href)}" target="_blank" rel="noopener noreferrer" title="Open this line on GitHub">${esc(label)}</a>`;
+  }
+  return `<button type="button" class="loc" data-action="open-file" data-file="${esc(item.file)}" data-line="${item.line}" title="Open this line in Notepad++">${esc(label)}</button>`;
+}
+
+async function sendToUserStatus(button) {
+  const repo = state.repo || (state.scan && state.scan.repoRoot) || "";
+  const item = state.scan && state.scan.hotspots.find((hotspot) => hotspot.id === button.dataset.id);
+  if (!repo || !item) return;
+  button.disabled = true;
+  const line = String(item.line);
+  try {
+    const saved = await fetch("/api/entries?repo=" + encodeURIComponent(repo)).then(readJsonResponse);
+    const rows = Array.isArray(saved.rows) ? saved.rows : [];
+    const record = triageRecord(item);
+    const existing = rows.find((row) => row.source === item.id || (row.name === item.title && row.file === item.file && String(row.line) === line));
+    if (existing) {
+      existing.source = item.id;
+      existing.status = workflowValue(record);
+      existing.severity = shownPriority(item) || existing.severity || "Medium";
+      const response = await fetch("/api/entries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repo, rows }),
+      });
+      if (!response.ok) throw new Error("save failed");
+      state.sentToUser.add(item.id);
+      button.textContent = "In User Status";
+      return;
+    }
+    if (rows.length >= 400) {
+      button.disabled = false;
+      button.textContent = "Sheet is full";
+      return;
+    }
+    const step = state.catalog && state.catalog.steps.find((entry) => entry.id === item.stepId);
+    rows.push({
+      id: crypto.randomUUID(),
+      source: item.id,
+      name: item.title,
+      file: item.file,
+      line,
+      synopsis: item.why || "",
+      general: joinRemediation(step && Array.isArray(step.guidance) ? step.guidance.join(" ") : "", item.secureAlternative || ""),
+      specific: "",
+      status: workflowValue(record),
+      severity: shownPriority(item) || "Medium",
+    });
+    const response = await fetch("/api/entries", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ repo, rows }),
+    });
+    if (!response.ok) throw new Error("save failed");
+    state.sentToUser.add(item.id);
+    button.textContent = "In User Status";
+  } catch (err) {
+    button.disabled = false;
+    button.textContent = "Could not add";
+  }
+}
+
+async function readJsonResponse(response) {
+  if (!response.ok) throw new Error("request failed");
+  return response.json();
+}
+
 async function openInNotepad(button) {
   const repo = state.scan && state.scan.repoRoot;
   const file = button.dataset.file;
@@ -957,7 +1242,16 @@ async function onClick(event) {
     state.open[button.dataset.step] = willOpen;
     return;
   }
+  if (action === "to-user") {
+    await sendToUserStatus(button);
+    return;
+  }
   if (action === "open-file") {
+    const href = githubFileUrl(button.dataset.file, Number(button.dataset.line));
+    if (href) {
+      window.open(href, "_blank", "noopener");
+      return;
+    }
     await openInNotepad(button);
     return;
   }
@@ -972,8 +1266,10 @@ async function onClick(event) {
     return;
   }
   if (action === "mark") {
-    state.marks[button.dataset.step] = button.dataset.status;
-    saveMarks();
+    if (button.dataset.status === "not-reviewed") delete state.marks[button.dataset.step];
+    else state.marks[button.dataset.step] = button.dataset.status;
+    storeProjectMarks();
+    scheduleSave();
     document.querySelectorAll(`[data-action="mark"][data-step="${cssEscape(button.dataset.step)}"]`).forEach((item) => {
       item.setAttribute("aria-pressed", item.dataset.status === button.dataset.status ? "true" : "false");
     });
@@ -983,7 +1279,8 @@ async function onClick(event) {
   }
   if (action === "reset-marks") {
     state.marks = {};
-    saveMarks();
+    storeProjectMarks();
+    scheduleSave();
     if (state.mode === "passive") renderGuide();
     else renderActiveList();
     updateProgress();
@@ -1054,11 +1351,9 @@ async function onClick(event) {
   }
   if (action === "browse-use") {
     if (!state.browse || !state.browse.path) return;
-    state.repo = state.browse.path;
-    const input = document.getElementById("repo-path");
-    if (input) input.value = state.repo;
+    const chosen = state.browse.path;
     closeBrowse();
-    scheduleSave();
+    await loadProject(chosen);
   }
 }
 
@@ -1129,6 +1424,22 @@ function renderBrowser() {
 }
 
 function onChange(event) {
+  if (event.target.dataset.action === "workflow") {
+    const repo = state.scan && state.scan.repoRoot;
+    const hotId = event.target.dataset.id;
+    if (!repo || !hotId) return;
+    const current = triageRecord({ id: hotId });
+    const next = fieldsForWorkflow(event.target.value);
+    writeTriage(repo, hotId, {
+      status: next.status,
+      track: next.track,
+      needsReview: current.needsReview,
+      severity: current.severity,
+    });
+    scheduleSave();
+    renderActiveList();
+    return;
+  }
   if (event.target.dataset.action === "severity") {
     const repo = state.scan && state.scan.repoRoot;
     const hotId = event.target.dataset.id;
@@ -1150,11 +1461,18 @@ function onChange(event) {
     if (!repo || !hotId) return;
     const current = triageRecord({ id: hotId });
     if (event.target.dataset.status === "needs-review") {
-      writeTriage(repo, hotId, { status: current.status, needsReview: event.target.checked, severity: current.severity });
+      writeTriage(repo, hotId, { status: current.status, track: current.track, needsReview: event.target.checked, severity: current.severity });
     } else if (event.target.checked) {
-      writeTriage(repo, hotId, { status: event.target.dataset.status, needsReview: current.needsReview, severity: current.severity });
+      const decision = event.target.dataset.status;
+      const keepStage = decision === "true-positive" && ["confirmed", "in-remediation", "mitigated"].includes(current.track);
+      writeTriage(repo, hotId, {
+        status: decision,
+        track: keepStage ? current.track : "",
+        needsReview: current.needsReview,
+        severity: current.severity,
+      });
     } else {
-      writeTriage(repo, hotId, { status: "", needsReview: current.needsReview, severity: current.severity });
+      writeTriage(repo, hotId, { status: "", track: "", needsReview: current.needsReview, severity: current.severity });
     }
     scheduleSave();
     renderActiveList();
@@ -1172,14 +1490,19 @@ function onChange(event) {
   else if (id === "only-linked") state.linked = event.target.checked;
   else if (id === "hide-resolved") state.hideResolved = event.target.checked;
   else if (id === "hide-ignored") state.hideIgnored = event.target.checked;
+  else if (id === "hide-duplicates") state.hideDuplicates = event.target.checked;
   else if (id === "repo-history") {
     if (!event.target.value) return;
-    state.repo = event.target.value;
+    loadProject(event.target.value, { missingScan: true });
+    return;
+  } else if (id === "repo-path") {
+    loadProject(event.target.value);
+    return;
+  } else if (id === "github-link") {
+    state.github = event.target.value;
+    storeProjectGithub();
     scheduleSave();
-    restoreScan(state.repo).then((ok) => {
-      if (!ok) state.scanError = "No saved scan for that folder.";
-      renderActiveList();
-    });
+    if (state.mode === "active") renderActiveList();
     return;
   } else return;
   state.holdClosed = false;
@@ -1189,6 +1512,12 @@ function onChange(event) {
 }
 
 function onInput(event) {
+  if (event.target.id === "github-link") {
+    state.github = event.target.value;
+    storeProjectGithub();
+    scheduleSave();
+    return;
+  }
   if (event.target.id === "repo-path") {
     state.repo = event.target.value;
     scheduleSave();
@@ -1213,6 +1542,19 @@ async function refreshHistory() {
   }
 }
 
+async function loadProject(path, options = {}) {
+  switchProject(path);
+  const input = document.getElementById("repo-path");
+  if (input) input.value = state.repo;
+  const github = document.getElementById("github-link");
+  if (github) github.value = state.github;
+  const ok = await restoreScan(state.repo);
+  if (!ok) state.scanError = options.missingScan ? "No saved scan for that folder." : "";
+  scheduleSave();
+  if (state.mode === "passive") renderGuide();
+  else renderActiveList();
+}
+
 async function restoreScan(repo) {
   try {
     const response = await fetch(`/api/scans?repo=${encodeURIComponent(repo)}`);
@@ -1220,8 +1562,8 @@ async function restoreScan(repo) {
     const body = await response.json();
     if (!body || typeof body.repoRoot !== "string" || !Array.isArray(body.hotspots)) return false;
     state.scan = body;
-    state.repo = body.repoRoot;
     state.scanError = "";
+    switchProject(body.repoRoot);
     return true;
   } catch (err) {
     return false;
@@ -1245,6 +1587,7 @@ async function runScan() {
     } else {
       state.scan = body;
       state.scanError = "";
+      switchProject(body.repoRoot);
       await refreshHistory();
     }
   } catch (err) {

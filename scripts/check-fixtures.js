@@ -11,7 +11,7 @@ function fail(message) {
 
 async function main() {
   assertCatalog();
-  if (STEPS.length !== 16) fail(`Expected 16 steps, found ${STEPS.length}`);
+  if (STEPS.length !== 19) fail(`Expected 19 steps, found ${STEPS.length}`);
   for (const item of allSearches()) {
     if (item.regex.includes("(?<=") || item.regex.includes("(?<!")) {
       fail(`Lookbehind in ${item.id}`);

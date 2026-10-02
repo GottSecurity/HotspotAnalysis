@@ -13,8 +13,12 @@ assertCatalog();
 const uiRoot = path.resolve(__dirname, "ui");
 const sessionPath = path.resolve(__dirname, "data", "session.json");
 const scansDir = path.resolve(__dirname, "data", "scans");
+const entriesPath = path.resolve(__dirname, "data", "entries.json");
 const appPage = "/GottSecurity/HotspotAnalysis/Index.html";
 const statusPage = "/GottSecurity/HotspotAnalysis/Status.html";
+const entryPage = "/GottSecurity/HotspotAnalysis/StatusEntry.html";
+const ENTRY_TRACKS = ["needs-review", "true-positive", "confirmed", "in-remediation", "mitigated", "remediated", "resolved", "ignored"];
+const ENTRY_SEVERITIES = ["Critical", "High", "Medium", "Low"];
 const catalog = toClientCatalog();
 const options = parseArgs(process.argv);
 const CHOICES = {
@@ -193,9 +197,12 @@ function defaultSession() {
     linked: false,
     hideResolved: true,
     hideIgnored: true,
+    hideDuplicates: false,
     sort: "priority",
     view: "findings",
     triage: {},
+    marks: {},
+    github: {},
   };
 }
 
@@ -247,6 +254,29 @@ function normalizeTriage(raw) {
   return triage;
 }
 
+function normalizeReviewMarks(raw) {
+  const marks = {};
+  const allowed = ["reviewing", "issue", "reviewed"];
+  const stepIds = new Set(catalog.steps.map((step) => step.id));
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return marks;
+  let count = 0;
+  for (const repo of Object.keys(raw)) {
+    if (count >= 4000) break;
+    const cleanRepo = textValue(repo, 1024);
+    const bucket = raw[repo];
+    if (!cleanRepo || !bucket || typeof bucket !== "object" || Array.isArray(bucket)) continue;
+    const next = {};
+    for (const stepId of Object.keys(bucket)) {
+      if (count >= 4000) break;
+      if (!stepIds.has(stepId) || !allowed.includes(bucket[stepId])) continue;
+      next[stepId] = bucket[stepId];
+      count += 1;
+    }
+    if (Object.keys(next).length) marks[cleanRepo] = next;
+  }
+  return marks;
+}
+
 function choice(value, allowed, fallback) {
   return typeof value === "string" && allowed.includes(value) ? value : fallback;
 }
@@ -274,10 +304,106 @@ function normalizeSession(raw) {
     linked: source.linked === true,
     hideResolved: source.hideResolved !== false,
     hideIgnored: source.hideIgnored !== false,
+    hideDuplicates: source.hideDuplicates === true,
     sort: choice(source.sort, CHOICES.sort, base.sort),
     view: choice(source.view, CHOICES.view, base.view),
     triage: normalizeTriage(source.triage),
+    marks: normalizeReviewMarks(source.marks),
+    github: normalizeGithub(source.github),
   };
+}
+
+function normalizeGithub(raw) {
+  const next = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return next;
+  let count = 0;
+  for (const repo of Object.keys(raw)) {
+    if (count >= 40) break;
+    const key = textValue(repo, 1024);
+    const url = textValue(raw[repo], 500);
+    if (!key || !/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+/i.test(url)) continue;
+    next[key] = url;
+    count += 1;
+  }
+  return next;
+}
+
+function normalizeEntryRow(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const id = textValue(raw.id, 80);
+  if (!id) return null;
+  return {
+    id,
+    name: textValue(raw.name, 300),
+    file: textValue(raw.file, 500),
+    line: textValue(raw.line, 20),
+    synopsis: textValue(raw.synopsis, 2000),
+    general: textValue(raw.general, 4000),
+    specific: textValue(raw.specific, 4000),
+    status: ENTRY_TRACKS.includes(raw.status) ? raw.status : "needs-review",
+    severity: ENTRY_SEVERITIES.includes(raw.severity) ? raw.severity : "Medium",
+    source: textValue(raw.source, 500),
+  };
+}
+
+function normalizeEntries(raw) {
+  const entries = {};
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return entries;
+  let count = 0;
+  for (const repo of Object.keys(raw)) {
+    if (count >= 8000) break;
+    const key = textValue(repo, 1024);
+    if (repo !== "" && !key) continue;
+    const rows = raw[repo];
+    if (!Array.isArray(rows)) continue;
+    const next = [];
+    for (const row of rows) {
+      if (count >= 8000 || next.length >= 400) break;
+      const clean = normalizeEntryRow(row);
+      if (!clean) continue;
+      next.push(clean);
+      count += 1;
+    }
+    if (next.length) entries[key] = next;
+  }
+  return entries;
+}
+
+async function readEntries() {
+  try {
+    const raw = await fs.promises.readFile(entriesPath, "utf8");
+    return normalizeEntries(JSON.parse(raw));
+  } catch (err) {
+    return {};
+  }
+}
+
+async function writeEntries(raw) {
+  const next = normalizeEntries(raw);
+  await fs.promises.mkdir(path.dirname(entriesPath), { recursive: true });
+  await fs.promises.writeFile(entriesPath, JSON.stringify(next, null, 2));
+  return next;
+}
+
+async function handleEntries(req, res, url) {
+  const stored = await readEntries();
+  if (req.method === "GET") {
+    const repo = textValue(url.searchParams.get("repo") || "", 1024);
+    sendJson(res, 200, { repo, rows: stored[repo] || [] });
+    return;
+  }
+  let payload;
+  try {
+    payload = JSON.parse(await readBody(req));
+  } catch (err) {
+    sendJson(res, 400, { error: "Send a JSON body with rows." });
+    return;
+  }
+  const repo = textValue(payload && payload.repo, 1024);
+  const rows = Array.isArray(payload && payload.rows) ? payload.rows : [];
+  const next = { ...stored, [repo]: rows };
+  const saved = await writeEntries(next);
+  sendJson(res, 200, { repo, rows: saved[repo] || [] });
 }
 
 async function readSession() {
@@ -336,6 +462,7 @@ async function findNotepad() {
     path.join(process.env.ProgramFiles || "C:\\Program Files", "Notepad++", "notepad++.exe"),
     path.join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Notepad++", "notepad++.exe"),
     path.join(process.env.LOCALAPPDATA || "", "Programs", "Notepad++", "notepad++.exe"),
+    "D:\\bin\\Notepad++\\notepad++.exe",
   ].filter(Boolean);
   for (const candidate of candidates) {
     try {
@@ -537,6 +664,10 @@ const server = http.createServer(async (req, res) => {
       await handleOpen(req, res);
       return;
     }
+    if ((req.method === "GET" || req.method === "POST") && url.pathname === "/api/entries") {
+      await handleEntries(req, res, url);
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/favicon.ico") {
       res.writeHead(204);
       res.end();
@@ -554,6 +685,11 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "GET" && url.pathname === statusPage) {
       const page = await fs.promises.readFile(path.join(uiRoot, "status.html"));
+      send(res, 200, page, "text/html; charset=utf-8");
+      return;
+    }
+    if (req.method === "GET" && url.pathname === entryPage) {
+      const page = await fs.promises.readFile(path.join(uiRoot, "entry.html"));
       send(res, 200, page, "text/html; charset=utf-8");
       return;
     }
@@ -585,6 +721,7 @@ server.on("error", (err) => {
 server.listen(options.port, "127.0.0.1", () => {
   console.log(`Security Hotspot Analysis at http://127.0.0.1:${options.port}${appPage}`);
   console.log(`Status tracking at http://127.0.0.1:${options.port}${statusPage}`);
+  console.log(`User Status at http://127.0.0.1:${options.port}${entryPage}`);
   console.log("Passive mode does not read a repository. Active scan runs only when you ask.");
   if (options.repo) console.log(`Default repo path: ${options.repo}`);
 });
